@@ -37,4 +37,4 @@ from .interfaces.interfaces import BaseKeyboardInterface, KeyboardInterface, Gam
                                    VanillaKeyboardInterface, ControllerKeyboardInterface, XCoMKeyboardInterface
 from .logging_and_saving.VisualizationRecorder import VisualizationRecorder
 from .logging_and_saving.AnalysisRecorder import ScreenShotter, AnalysisRecorder, CSVLogger, DictLogger, SuccessRater
-
+from .logging_and_saving.GridVideoRecorder import GridVideoRecorder

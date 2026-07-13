@@ -35,7 +35,7 @@ from colorama import Fore
 
 import isaacgym
 from gym.envs import *
-from gym.utils import get_args, task_registry, Logger, VisualizationRecorder, ScreenShotter, AnalysisRecorder, CSVLogger, DictLogger, SuccessRater
+from gym.utils import get_args, task_registry, Logger, VisualizationRecorder, ScreenShotter, AnalysisRecorder, CSVLogger, DictLogger, SuccessRater, GridVideoRecorder
 from gym.scripts.plotting import LivePlotter
 
 import numpy as np
@@ -43,7 +43,8 @@ import torch
 
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(args)
-    env_cfg.env.num_envs = min(env_cfg.env.num_envs, 9)
+    requested_video_envs = 4 if args.video_2x2 else 1
+    env_cfg.env.num_envs = max(requested_video_envs, min(env_cfg.env.num_envs, 9))
     env_cfg.env.env_spacing = 2.
     env_cfg.env.episode_length_s = int(1e7) # 5, int(1e7)
     env_cfg.seed = 1
@@ -101,8 +102,20 @@ def play(args):
     log_states = [ "contact_forces" ] # "base_lin_vel", "base_pos", "dof_pos", 
     log_commands = [] # "step_commands" 
     log_rewards = [] #[ "wrong_contact", "step_location", ]
-    max_it = int(1e6)
+    max_it = args.video_length if args.video_2x2 else int(1e6)
     screenshotter = ScreenShotter(env, train_cfg.runner.experiment_name, policy_runner.log_dir)
+    grid_recorder = None
+    if args.video_2x2:
+        robot_ids = [int(value.strip()) for value in args.video_robot_ids.split(",")]
+        grid_recorder = GridVideoRecorder(
+            env,
+            train_cfg.runner.experiment_name,
+            robot_ids,
+            width=args.video_width,
+            height=args.video_height,
+            fps=args.video_fps,
+            run_name=args.run_name or train_cfg.runner.run_name,
+        )
 
     if LIVE_PLOT:
         live_plotter = LivePlotter(log_states, log_commands, log_rewards, robot_index, joint_index, env.dt)
@@ -121,6 +134,9 @@ def play(args):
         policy_runner.set_actions(actions)
         env.step()
         policy_runner.reset_envs()
+
+        if grid_recorder is not None:
+            grid_recorder.record_frame()
         
         if env.screenshot:
             image = env.gym.get_camera_image(env.sim, env.envs[0], env.camera_handle, isaacgym.gymapi.IMAGE_COLOR)
@@ -193,6 +209,9 @@ def play(args):
                 print("collection_time:", stop - start)
                 success_rater.save_and_exit()
             success_rater.log(i, test_episodes, env.reset_buf.sum().item(), env.timed_out.sum().item())
+
+    if grid_recorder is not None:
+        grid_recorder.close()
 
 
 

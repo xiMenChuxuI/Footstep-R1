@@ -41,6 +41,16 @@ from .humanoid.humanoid_vanilla import HumanoidVanilla
 from .humanoid.humanoid_vanilla_config import HumanoidVanillaCfg, HumanoidVanillaRunnerCfg
 from .humanoid.humanoid_controller import HumanoidController
 from .humanoid.humanoid_controller_config import HumanoidControllerCfg, HumanoidControllerRunnerCfg
+from .humanoid.humanoid_foothold_tracker import R1FootholdTracker
+from .humanoid.humanoid_foothold_tracker_config import (
+    R1FootholdTrackerCfg,
+    R1FootholdTrackerRunnerCfg,
+)
+from .hi_cl_12.hi_cl12_controller import Hicl12Controller
+from .hi_cl_12.r1_12dof_controller_config import (
+    R1_12DofControllerCfg,
+    R1_12DofControllerRunnerCfg,
+)
 
 from gym.utils.task_registry import task_registry
 
@@ -49,5 +59,22 @@ task_registry.register("cartpole", Cartpole, CartpoleCfg, CartpoleRunnerCfg)
 
 task_registry.register("humanoid_vanilla", HumanoidVanilla, HumanoidVanillaCfg, HumanoidVanillaRunnerCfg)
 task_registry.register("humanoid_controller", HumanoidController, HumanoidControllerCfg, HumanoidControllerRunnerCfg)
+task_registry.register(
+    "r1_foothold_tracker",
+    R1FootholdTracker,
+    R1FootholdTrackerCfg,
+    R1FootholdTrackerRunnerCfg,
+)
+task_registry.register(
+    "humanoid_foothold_tracker",
+    R1FootholdTracker,
+    R1FootholdTrackerCfg,
+    R1FootholdTrackerRunnerCfg,
+)
+task_registry.register(
+    "r1_12dof_controller",
+    Hicl12Controller,
+    R1_12DofControllerCfg,
+    R1_12DofControllerRunnerCfg,
+)
                       
-

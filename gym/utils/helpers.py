@@ -101,6 +101,10 @@ def parse_sim_params(args, cfg):
     return sim_params
 
 def get_load_path(root, load_run=-1, checkpoint=-1):
+    if str(load_run) == "-1":
+        load_run = -1
+    if str(checkpoint) == "-1":
+        checkpoint = -1
     try:
         runs = sorted(os.listdir(root),
                         key=lambda x: os.path.getctime(os.path.join(root, x)))
@@ -138,6 +142,8 @@ def update_cfg_from_args(env_cfg, train_cfg, args):
             env_cfg.commands.sampling_method = args.sampling_method
         if args.record is not None:
             env_cfg.viewer.record = args.record
+        if args.video_2x2:
+            env_cfg.viewer.record = True
     if train_cfg is not None:
         if args.seed is not None:
             train_cfg.seed = args.seed
@@ -172,7 +178,6 @@ def get_args():
         {"name": "--headless", "action": "store_true", "default": False, "help": "Force display off at all times"},
         {"name": "--horovod", "action": "store_true", "default": False, "help": "Use horovod for multi-gpu training"},
         {"name": "--rl_device", "type": str, "default": "cuda:0", "help": 'Device used by the RL algorithm, (cpu, gpu, cuda:0, cuda:1 etc..)'},
-        {"name": "--sim_device", "type": str, "default": "cuda:0", "help": 'Device used by the simulation, (cpu, gpu, cuda:0, cuda:1 etc..)'},
         {"name": "--num_envs", "type": int, "help": "Number of environments to create. Overrides config file if provided."},
         {"name": "--seed", "type": int, "help": "Random seed. Overrides config file if provided."},
         {"name": "--max_iterations", "type": int, "help": "Maximum number of training iterations. Overrides config file if provided."},
@@ -193,6 +198,18 @@ def get_args():
             "Select sampling method. Overrides config file if provided."},
         {"name": "--record", "action": "store_true", "default": False,
          "help": "Record IsaacGym simulation at real-time speed."},
+        {"name": "--video_2x2", "action": "store_true", "default": False,
+         "help": "Record four Isaac Gym camera views as a 2x2 MP4 during play."},
+        {"name": "--video_length", "type": int, "default": 600,
+         "help": "Number of policy steps to record with --video_2x2."},
+        {"name": "--video_fps", "type": int, "default": 50,
+         "help": "Output frame rate for --video_2x2."},
+        {"name": "--video_robot_ids", "type": str, "default": "0,1,2,3",
+         "help": "Four comma-separated environment ids for the 2x2 video."},
+        {"name": "--video_width", "type": int, "default": 640,
+         "help": "Width of each 2x2 video tile."},
+        {"name": "--video_height", "type": int, "default": 360,
+         "help": "Height of each 2x2 video tile."},
     ]
     # parse arguments
     args = gymutil.parse_arguments(
@@ -205,4 +222,3 @@ def get_args():
     if args.sim_device=='cuda':
         args.sim_device += f":{args.sim_device_id}"
     return args
-

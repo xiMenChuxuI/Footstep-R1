@@ -31,8 +31,78 @@
 import torch
 from torch import Tensor
 import numpy as np
-from isaacgym.torch_utils import quat_apply, normalize, torch_rand_float
 from typing import Tuple
+
+def normalize(x, eps: float = 1e-9):
+    return x / x.norm(p=2, dim=-1).clamp(min=eps).unsqueeze(-1)
+
+def quat_apply(a, b):
+    shape = b.shape
+    a = a.reshape(-1, 4)
+    b = b.reshape(-1, 3)
+    xyz = a[:, :3]
+    t = xyz.cross(b, dim=-1) * 2
+    return (b + a[:, 3:] * t + xyz.cross(t, dim=-1)).view(shape)
+
+def quat_rotate(q, v):
+    shape = q.shape
+    q_w = q[:, -1]
+    q_vec = q[:, :3]
+    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
+    b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
+    c = q_vec * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1) * 2.0
+    return a + b + c
+
+def quat_rotate_inverse(q, v):
+    shape = q.shape
+    q_w = q[:, -1]
+    q_vec = q[:, :3]
+    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
+    b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
+    c = q_vec * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1) * 2.0
+    return a - b + c
+
+def quat_conjugate(a):
+    shape = a.shape
+    a = a.reshape(-1, 4)
+    return torch.cat((-a[:, :3], a[:, -1:]), dim=-1).view(shape)
+
+def quat_unit(a):
+    return normalize(a)
+
+def quat_from_angle_axis(angle, axis):
+    theta = (angle / 2).unsqueeze(-1)
+    xyz = normalize(axis) * theta.sin()
+    w = theta.cos()
+    return quat_unit(torch.cat([xyz, w], dim=-1))
+
+def torch_rand_float(lower, upper, shape, device):
+    return (upper - lower) * torch.rand(*shape, device=device) + lower
+
+def get_euler_xyz(q):
+    qx, qy, qz, qw = 0, 1, 2, 3
+    sinr_cosp = 2.0 * (q[:, qw] * q[:, qx] + q[:, qy] * q[:, qz])
+    cosr_cosp = (
+        q[:, qw] * q[:, qw] - q[:, qx] * q[:, qx]
+        - q[:, qy] * q[:, qy] + q[:, qz] * q[:, qz]
+    )
+    roll = torch.atan2(sinr_cosp, cosr_cosp)
+
+    sinp = 2.0 * (q[:, qw] * q[:, qy] - q[:, qz] * q[:, qx])
+    pitch = torch.where(
+        torch.abs(sinp) >= 1,
+        torch.sign(sinp) * (np.pi / 2.0),
+        torch.asin(sinp),
+    )
+
+    siny_cosp = 2.0 * (q[:, qw] * q[:, qz] + q[:, qx] * q[:, qy])
+    cosy_cosp = (
+        q[:, qw] * q[:, qw] + q[:, qx] * q[:, qx]
+        - q[:, qy] * q[:, qy] - q[:, qz] * q[:, qz]
+    )
+    yaw = torch.atan2(siny_cosp, cosy_cosp)
+    period = 2.0 * np.pi
+    return roll % period, pitch % period, yaw % period
 
 # @ torch.jit.script
 def quat_apply_yaw(quat, vec):

@@ -55,11 +55,12 @@ class Hicl12Controller(LeggedRobot):
         super()._init_buffers()
         # * Robot states
         self.base_height = self.root_states[:, 2:3]
+        self.base_euler_xyz = get_euler_xyz_tensor(self.base_quat)
         self.right_hip_pos = self.rigid_body_state[
-            :, self.rigid_body_idx["r_hip_pitch_link"], :3
+            :, self.rigid_body_idx[getattr(self.cfg.asset, "right_hip_link", "r_hip_pitch_link")], :3
         ]
         self.left_hip_pos = self.rigid_body_state[
-            :, self.rigid_body_idx["l_hip_pitch_link"], :3
+            :, self.rigid_body_idx[getattr(self.cfg.asset, "left_hip_link", "l_hip_pitch_link")], :3
         ]
         self.CoM = torch.zeros(
             self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False
@@ -282,7 +283,10 @@ class Hicl12Controller(LeggedRobot):
         )
 
     def _compute_torques(self):
-        self.desired_pos_target = self.dof_pos_target + self.default_dof_pos
+        self.desired_pos_target = (
+            self.dof_pos_target * self.cfg.control.actuation_scale
+            + self.default_dof_pos
+        )
         q = self.dof_pos.clone()
         qd = self.dof_vel.clone()
         q_des = self.desired_pos_target.clone()
@@ -379,13 +383,14 @@ class Hicl12Controller(LeggedRobot):
         # print("_update_robot_states")
         """Update robot state variables"""
         self.base_height[:] = self.root_states[:, 2:3]
+        self.base_euler_xyz[:] = get_euler_xyz_tensor(self.base_quat)
         forward = quat_apply(self.base_quat, self.forward_vec)
         self.base_heading = torch.atan2(forward[:, 1], forward[:, 0]).unsqueeze(1)
         self.right_hip_pos = self.rigid_body_state[
-            :, self.rigid_body_idx["r_hip_pitch_link"], :3
+            :, self.rigid_body_idx[getattr(self.cfg.asset, "right_hip_link", "r_hip_pitch_link")], :3
         ]
         self.left_hip_pos = self.rigid_body_state[
-            :, self.rigid_body_idx["l_hip_pitch_link"], :3
+            :, self.rigid_body_idx[getattr(self.cfg.asset, "left_hip_link", "l_hip_pitch_link")], :3
         ]
         self.foot_states = self._calculate_foot_states(
             self.rigid_body_state[:, self.feet_ids, :7]
@@ -428,11 +433,11 @@ class Hicl12Controller(LeggedRobot):
         naxis = 3
         self.ankle_vel_history[:, 0, naxis:] = self.ankle_vel_history[:, 0, :naxis]
         self.ankle_vel_history[:, 0, :naxis] = self.rigid_body_state[
-            :, self.rigid_body_idx["r_ankle_roll_link"], 7:10
+            :, self.rigid_body_idx[getattr(self.cfg.asset, "right_foot_link", "r_ankle_roll_link")], 7:10
         ]
         self.ankle_vel_history[:, 1, naxis:] = self.ankle_vel_history[:, 1, :naxis]
         self.ankle_vel_history[:, 1, :naxis] = self.rigid_body_state[
-            :, self.rigid_body_idx["l_ankle_roll_link"], 7:10
+            :, self.rigid_body_idx[getattr(self.cfg.asset, "left_foot_link", "l_ankle_roll_link")], 7:10
         ]
 
     def _calculate_foot_states(self, foot_states):
