@@ -215,3 +215,61 @@ This is a measurable improvement over the roughly 13.1 cm stage-one touchdown
 error while preserving stable forward locomotion, but it does not yet satisfy a
 5 cm precision target. Further work should focus on first-contact event rewards
 and a narrower foothold curriculum instead of increasing support rewards.
+
+## Stage-Three Event and Trajectory Training
+
+Stage three aligns the sampled footholds with the configured gait period and
+turns touchdown accuracy into a true first-contact objective. With a 0.30 s
+half-step period, the forward step-length range is now 0.08--0.16 m and the foot
+separation range is 0.18--0.22 m. This makes the midpoint command approximately
+0.4 m/s instead of asking the policy to reconcile the earlier 0.15--0.35 m step
+range with the velocity reward.
+
+The swing-foot reference now uses a smoothstep interpolation from the measured
+liftoff pose to the frozen stance-frame target, plus sinusoidal clearance. XY,
+Z, and yaw rewards follow this phase-dependent reference. Touchdown accuracy is
+evaluated only on a late-swing contact rising edge and is latched after the first
+event in each swing period. A preliminary run exposed repeated contact-edge
+credit from force chattering and was stopped at iteration 414; it is not used as
+a result. The per-swing latch was then added and covered by regression tests.
+
+The corrected policy was trained from scratch for 1000 iterations:
+
+```text
+run: Jul15_12-06-24_r1_stage3_latched_event_trajectory_1000
+checkpoint: model_1000.pt
+total timesteps: 24,576,000
+wall time: 883.66 s
+final mean reward: 268.13
+final episode length: 1001.00
+final termination reward: 0.0000
+```
+
+Independent deterministic inference over 12,800 environment steps produced:
+
+```text
+world forward speed:          0.4103 m/s
+stance contact ratio:         0.9882
+flight ratio:                 0.0058
+double support ratio:         0.2276
+mean vertical speed:          0.1260 m/s
+mean swing XY error:          0.1579 m
+mean touchdown XY error:      0.1458 m
+mean touchdown X error:       0.0963 m
+mean touchdown Y error:       0.0913 m
+mean touchdown yaw error:     0.0224 rad
+contact-foot slip speed:      0.0223 m/s
+mean action RMS:              1.2358 rad
+touchdown samples:            443
+resets:                       1
+```
+
+The resulting speed closely matches the 0.4 m/s design target, stance contact
+and slip improve over stage two, and yaw touchdown error is lower. XY touchdown
+precision is not yet improved: 14.58 cm versus 12.04 cm in the stage-two
+diagnostic. The touchdown measurements also changed from repeated late-contact
+samples to one first-contact sample per swing, so that comparison is indicative
+rather than perfectly like-for-like. The next precision experiment should keep
+the corrected event semantics and introduce a staged XY curriculum or an
+explicit terminal swing deceleration objective; it should not restore the
+contact-chattering reward path.

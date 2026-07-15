@@ -37,6 +37,7 @@ class MockEnv:
 def sampler_cfg():
     return SimpleNamespace(
         step_length_range=[0.15, 0.35],
+        step_width_range=[0.18, 0.22],
         direction_offset_deg=[-20.0, 20.0],
         yaw_offset_deg=[-20.0, 20.0],
         height_range=[0.0, 0.0],
@@ -113,7 +114,8 @@ class FootholdGoalTests(unittest.TestCase):
         self.assertAlmostEqual(env_cfg.scaling.clip_actions, 4.0)
         self.assertEqual(env_cfg.foothold_goal.movement_direction_deg, [0.0, 0.0])
         self.assertEqual(env_cfg.foothold_goal.feet_direction_deg, [0.0, 0.0])
-        self.assertGreaterEqual(env_cfg.foothold_goal.step_length_range[0], 0.0)
+        self.assertEqual(env_cfg.foothold_goal.step_length_range, [0.08, 0.16])
+        self.assertEqual(env_cfg.foothold_goal.step_width_range, [0.18, 0.22])
         self.assertEqual(env_cfg.commands.ranges.lin_vel_x, [0.4, 0.4])
         self.assertEqual(env_cfg.asset.end_effectors, [
             "right_ankle_roll_link", "left_ankle_roll_link"
@@ -136,26 +138,73 @@ class FootholdGoalTests(unittest.TestCase):
         self.assertNotIn("foot_contact_state", runner_cfg.policy.actor_obs)
         self.assertIn("foot_contact_state", runner_cfg.policy.critic_obs)
 
-    def test_swing_z_endpoint_reward_is_late_phase_only(self):
+    def test_swing_trajectory_reference(self):
         tracker = R1FootholdTracker.__new__(R1FootholdTracker)
-        tracker.phase = torch.tensor([[0.10], [0.45]])
+        tracker.num_envs = 2
+        tracker.device = torch.device("cpu")
+        tracker.phase = torch.tensor([[0.0], [0.25]])
+        tracker.swing_foot_index = torch.tensor([LEFT_FOOT, LEFT_FOOT])
+        tracker.swing_start_pos = torch.zeros(2, 3)
+        tracker.swing_start_yaw = torch.zeros(2)
         tracker.cfg = SimpleNamespace(
             rewards=SimpleNamespace(
-                touchdown_phase=0.70,
-                swing_z_tracking_sigma=0.01,
+                foot_clearance=0.07,
             )
         )
-        error = torch.tensor([[0.0, 0.0, 0.05], [0.0, 0.0, 0.05]])
-        tracker._swing_tracking_errors = lambda: (
-            error,
-            torch.zeros(2),
-            torch.zeros(2, dtype=torch.bool),
+        tracker.goal_generator = SimpleNamespace(
+            world_target_pos=torch.tensor(
+                [[[1.0, 0.0, 0.0], [0.0, 0.0, 0.0]]] * 2
+            ),
+            world_target_yaw=torch.zeros(2, 2),
+        )
+        position = torch.zeros(2, 2, 3)
+        position[1, LEFT_FOOT] = torch.tensor([0.5, 0.0, 0.07])
+        tracker._canonical_foot_values = lambda: (
+            position,
+            torch.zeros(2, 2),
+            torch.zeros(2, 2, dtype=torch.bool),
+            torch.zeros(2, 2, 3),
         )
 
-        reward = tracker._reward_swing_foot_z_tracking()
+        position_error, yaw_error = tracker._swing_trajectory_errors()
 
-        self.assertEqual(reward[0].item(), 0.0)
-        self.assertGreater(reward[1].item(), 0.0)
+        torch.testing.assert_close(position_error, torch.zeros_like(position_error))
+        torch.testing.assert_close(yaw_error, torch.zeros_like(yaw_error))
+
+    def test_touchdown_event_is_contact_rising_edge(self):
+        tracker = R1FootholdTracker.__new__(R1FootholdTracker)
+        tracker.num_envs = 2
+        tracker.device = torch.device("cpu")
+        tracker.phase = torch.tensor([[0.45], [0.45]])
+        tracker.swing_foot_index = torch.tensor([LEFT_FOOT, RIGHT_FOOT])
+        tracker.touchdown_credited = torch.zeros(2, dtype=torch.bool)
+        tracker.previous_foot_contact = torch.zeros(2, 2, dtype=torch.bool)
+        tracker.touchdown_event = torch.zeros(2, 2, dtype=torch.bool)
+        tracker.last_touchdown_pos = torch.zeros(2, 3)
+        tracker.last_touchdown_target = torch.zeros(2, 3)
+        tracker.has_touchdown_visual = torch.zeros(2, dtype=torch.bool)
+        tracker.goal_generator = SimpleNamespace(
+            world_target_pos=torch.ones(2, 2, 3)
+        )
+        tracker.cfg = SimpleNamespace(
+            rewards=SimpleNamespace(touchdown_phase=0.70)
+        )
+        contact = torch.tensor([[True, False], [False, True]])
+        tracker._canonical_foot_values = lambda: (
+            torch.zeros(2, 2, 3),
+            torch.zeros(2, 2),
+            contact,
+            torch.zeros(2, 2, 3),
+        )
+
+        tracker._update_touchdown_events()
+        self.assertEqual(tracker.touchdown_event.tolist(), contact.tolist())
+        self.assertTrue(tracker.touchdown_credited.all().item())
+        self.assertTrue(tracker.has_touchdown_visual.all().item())
+        torch.testing.assert_close(tracker.last_touchdown_target, torch.ones(2, 3))
+        tracker.previous_foot_contact[:] = False
+        tracker._update_touchdown_events()
+        self.assertFalse(tracker.touchdown_event.any().item())
 
 
 if __name__ == "__main__":

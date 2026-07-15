@@ -1,6 +1,7 @@
 """Phase-driven stance-frame foothold tracking task."""
 
 import torch
+from isaacgym import gymapi, gymutil
 
 from gym.envs.base.legged_robot import LeggedRobot
 from gym.envs.guidance.foothold_goal_sampler import RandomFootholdGoalSampler
@@ -10,6 +11,7 @@ from gym.envs.guidance.stance_foot_adapter import (
     phase_foot_indices,
 )
 from gym.envs.hi_cl_12.hi_cl12_controller import Hicl12Controller
+from gym.envs.hi_cl_12.hi_cl12_utils import FootStepGeometry, SimpleLineGeometry
 from gym.utils.math import quat_apply, wrap_to_pi
 
 
@@ -35,6 +37,16 @@ class R1FootholdTracker(Hicl12Controller):
         self.foot_contact_force = torch.zeros(n, 6, device=device)
         self.world_foot_target_error = torch.zeros(n, 6, device=device)
         self.stance_accuracy_latched = torch.zeros(n, device=device)
+        self.swing_start_pos = torch.zeros(n, 3, device=device)
+        self.swing_start_yaw = torch.zeros(n, device=device)
+        self.previous_foot_contact = torch.zeros(
+            n, 2, dtype=torch.bool, device=device
+        )
+        self.touchdown_event = torch.zeros(n, 2, dtype=torch.bool, device=device)
+        self.touchdown_credited = torch.zeros(n, dtype=torch.bool, device=device)
+        self.last_touchdown_pos = torch.zeros(n, 3, device=device)
+        self.last_touchdown_target = torch.zeros(n, 3, device=device)
+        self.has_touchdown_visual = torch.zeros(n, dtype=torch.bool, device=device)
         self.goal_generator = RandomFootholdGoalSampler(self, self.cfg.foothold_goal)
 
     def _calculate_foot_states(self, foot_states):
@@ -55,16 +67,26 @@ class R1FootholdTracker(Hicl12Controller):
         self.previous_swing_foot_index[env_ids] = LEFT_FOOT
         self.phase_switch_mask[env_ids] = False
         self.stance_accuracy_latched[env_ids] = 0.0
+        self.previous_foot_contact[env_ids] = False
+        self.touchdown_event[env_ids] = False
+        self.touchdown_credited[env_ids] = False
+        self.has_touchdown_visual[env_ids] = False
         self.goal_generator.reset(env_ids)
         self.foothold_goal[env_ids] = self.goal_generator.get_goal()[env_ids]
+        self._latch_swing_start(env_ids)
 
     def _post_physics_step_callback(self):
         # Skip the legacy moving-base planner update inherited from Hicl12Controller.
         LeggedRobot._post_physics_step_callback(self)
         self._update_robot_states()
+        self.foot_contact[:] = (
+            self.contact_forces[:, self.feet_ids, 2]
+            > self.cfg.rewards.contact_force_threshold
+        )
         self._calculate_CoM()
         self._calculate_ICP()
         self._advance_phase_and_goals()
+        self._update_touchdown_events()
 
     def _advance_phase_and_goals(self):
         wrapped = self.phase[:, 0] >= 1.0
@@ -82,9 +104,128 @@ class R1FootholdTracker(Hicl12Controller):
 
         self.swing_foot_index[:] = new_swing
         self.stance_foot_index[:] = new_stance
+        switch_ids = self.phase_switch_mask.nonzero(as_tuple=False).flatten()
+        self.touchdown_credited[switch_ids] = False
+        self._latch_swing_start(switch_ids)
         env_ids = torch.arange(self.num_envs, device=self.device)
         self.goal_generator.update(env_ids, self.phase_switch_mask)
         self.foothold_goal[:] = self.goal_generator.get_goal()
+
+    def _latch_swing_start(self, env_ids):
+        if env_ids.numel() == 0:
+            return
+        position, yaw, _, _ = self._canonical_foot_values()
+        swing = self.swing_foot_index[env_ids]
+        batch = torch.arange(env_ids.numel(), device=self.device)
+        self.swing_start_pos[env_ids] = position[env_ids][batch, swing]
+        self.swing_start_yaw[env_ids] = yaw[env_ids][batch, swing]
+
+    def _update_touchdown_events(self):
+        position, _, contact, _ = self._canonical_foot_values()
+        rising = contact & ~self.previous_foot_contact
+        batch = torch.arange(self.num_envs, device=self.device)
+        valid = (
+            rising[batch, self.swing_foot_index]
+            & ~self.touchdown_credited
+            & (self._local_phase() > self.cfg.rewards.touchdown_phase)
+        )
+        self.touchdown_event[:] = False
+        self.touchdown_event[batch, self.swing_foot_index] = valid
+        if torch.any(valid):
+            self.last_touchdown_pos[valid] = position[batch, self.swing_foot_index][valid]
+            self.last_touchdown_target[valid] = self.goal_generator.world_target_pos[
+                batch, self.swing_foot_index
+            ][valid]
+            self.has_touchdown_visual[valid] = True
+        self.touchdown_credited |= valid
+        self.previous_foot_contact[:] = contact
+
+    def _visualization(self):
+        """Draw active world-frame footholds and their tracking error."""
+        if not self.cfg.viewer.draw_foothold_targets:
+            return
+
+        self.gym.clear_lines(self.viewer)
+        position, yaw, _, _ = self._canonical_foot_values()
+        target_pos = self.goal_generator.world_target_pos
+        target_yaw = self.goal_generator.world_target_yaw
+        stance_sphere = gymutil.WireframeSphereGeometry(
+            0.018, 6, 6, None, color=(1.0, 1.0, 0.0)
+        )
+        swing_sphere = gymutil.WireframeSphereGeometry(
+            0.018, 6, 6, None, color=(0.0, 1.0, 0.0)
+        )
+        touchdown_sphere = gymutil.WireframeSphereGeometry(
+            0.014, 6, 6, None, color=(1.0, 1.0, 1.0)
+        )
+
+        for env_id in range(self.num_envs):
+            # Actual feet: left cyan, right magenta.
+            for foot, color in ((LEFT_FOOT, (0.0, 1.0, 1.0)), (RIGHT_FOOT, (1.0, 0.0, 1.0))):
+                actual = FootStepGeometry(
+                    position[env_id, foot, :2], yaw[env_id, foot], color=color
+                )
+                gymutil.draw_lines(
+                    actual, self.gym, self.viewer, self.envs[env_id], pose=None
+                )
+
+            # Active targets: left blue, right red. One is the current stance
+            # pose and the other is the phase-latched swing target.
+            for foot, color in ((LEFT_FOOT, (0.0, 0.0, 1.0)), (RIGHT_FOOT, (1.0, 0.0, 0.0))):
+                target = FootStepGeometry(
+                    target_pos[env_id, foot, :2], target_yaw[env_id, foot], color=color
+                )
+                gymutil.draw_lines(
+                    target, self.gym, self.viewer, self.envs[env_id], pose=None
+                )
+
+            stance = self.stance_foot_index[env_id].item()
+            swing = self.swing_foot_index[env_id].item()
+            stance_pose = gymapi.Transform(
+                gymapi.Vec3(*position[env_id, stance].tolist()), r=None
+            )
+            swing_pose = gymapi.Transform(
+                gymapi.Vec3(*position[env_id, swing].tolist()), r=None
+            )
+            gymutil.draw_lines(
+                stance_sphere, self.gym, self.viewer, self.envs[env_id], stance_pose
+            )
+            gymutil.draw_lines(
+                swing_sphere, self.gym, self.viewer, self.envs[env_id], swing_pose
+            )
+
+            active_error = SimpleLineGeometry(
+                position[env_id, swing],
+                target_pos[env_id, swing],
+                color=(1.0, 0.5, 0.0),
+            )
+            gymutil.draw_lines(
+                active_error, self.gym, self.viewer, self.envs[env_id], pose=None
+            )
+
+            if self.has_touchdown_visual[env_id]:
+                touchdown_pose = gymapi.Transform(
+                    gymapi.Vec3(*self.last_touchdown_pos[env_id].tolist()), r=None
+                )
+                gymutil.draw_lines(
+                    touchdown_sphere,
+                    self.gym,
+                    self.viewer,
+                    self.envs[env_id],
+                    touchdown_pose,
+                )
+                touchdown_error = SimpleLineGeometry(
+                    self.last_touchdown_pos[env_id],
+                    self.last_touchdown_target[env_id],
+                    color=(1.0, 1.0, 1.0),
+                )
+                gymutil.draw_lines(
+                    touchdown_error,
+                    self.gym,
+                    self.viewer,
+                    self.envs[env_id],
+                    pose=None,
+                )
 
     def _canonical_foot_values(self):
         position = self.foot_states[:, [1, 0], :3]
@@ -134,6 +275,28 @@ class R1FootholdTracker(Hicl12Controller):
             contact[batch, swing],
         )
 
+    def _swing_trajectory_errors(self):
+        position, yaw, _, _ = self._canonical_foot_values()
+        batch = torch.arange(self.num_envs, device=self.device)
+        swing = self.swing_foot_index
+        target_pos = self.goal_generator.world_target_pos[batch, swing]
+        target_yaw = self.goal_generator.world_target_yaw[batch, swing]
+
+        phase = self._local_phase()
+        progress = phase.square() * (3.0 - 2.0 * phase)
+        reference_pos = self.swing_start_pos + progress[:, None] * (
+            target_pos - self.swing_start_pos
+        )
+        reference_pos[:, 2] += self.cfg.rewards.foot_clearance * torch.sin(
+            torch.pi * phase
+        )
+        yaw_delta = wrap_to_pi(target_yaw - self.swing_start_yaw)
+        reference_yaw = wrap_to_pi(self.swing_start_yaw + progress * yaw_delta)
+        return (
+            position[batch, swing] - reference_pos,
+            wrap_to_pi(yaw[batch, swing] - reference_yaw),
+        )
+
     def _tracking_reward(self, squared_error, sigma=None):
         if sigma is None:
             sigma = self.cfg.rewards.foothold_tracking_sigma
@@ -147,29 +310,28 @@ class R1FootholdTracker(Hicl12Controller):
         )
 
     def _reward_swing_foot_xy_tracking(self):
-        error, _, _ = self._swing_tracking_errors()
+        error, _ = self._swing_trajectory_errors()
         return self._tracking_reward(
             torch.sum(error[:, :2].square(), dim=-1),
             self.cfg.rewards.swing_xy_tracking_sigma,
         )
 
     def _reward_swing_foot_z_tracking(self):
-        error, _, _ = self._swing_tracking_errors()
-        late_swing = self._local_phase() > self.cfg.rewards.touchdown_phase
-        return late_swing.float() * self._tracking_reward(
+        error, _ = self._swing_trajectory_errors()
+        return self._tracking_reward(
             error[:, 2].square(), self.cfg.rewards.swing_z_tracking_sigma
         )
 
     def _reward_swing_foot_yaw_tracking(self):
-        _, error, _ = self._swing_tracking_errors()
+        _, error = self._swing_trajectory_errors()
         return self._tracking_reward(
             error.square(), self.cfg.rewards.swing_yaw_tracking_sigma
         )
 
     def _reward_touchdown_accuracy(self):
-        error, yaw_error, contact = self._swing_tracking_errors()
-        local_phase = self._local_phase()
-        touchdown = contact & (local_phase > self.cfg.rewards.touchdown_phase)
+        error, yaw_error, _ = self._swing_tracking_errors()
+        batch = torch.arange(self.num_envs, device=self.device)
+        touchdown = self.touchdown_event[batch, self.swing_foot_index]
         accuracy = self._tracking_reward(
             torch.sum(error.square(), dim=-1) + 0.25 * yaw_error.square(),
             self.cfg.rewards.touchdown_tracking_sigma,

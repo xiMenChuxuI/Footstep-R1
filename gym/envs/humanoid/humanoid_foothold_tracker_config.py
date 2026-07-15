@@ -32,7 +32,10 @@ class R1FootholdTrackerCfg(R1_12DofControllerCfg):
             yaw_vel = 0.0
 
     class foothold_goal:
-        step_length_range = [0.10, 0.22]
+        # step_period=30 at dt=0.01 s gives 0.30 s per step. An average
+        # 0.12 m target is therefore consistent with the 0.4 m/s command.
+        step_length_range = [0.08, 0.16]
+        step_width_range = [0.18, 0.22]
         direction_offset_deg = [-5.0, 5.0]
         yaw_offset_deg = [-5.0, 5.0]
         height_range = [0.0, 0.0]
@@ -47,6 +50,9 @@ class R1FootholdTrackerCfg(R1_12DofControllerCfg):
     class domain_rand(R1_12DofControllerCfg.domain_rand):
         push_robots = False
 
+    class viewer(R1_12DofControllerCfg.viewer):
+        draw_foothold_targets = True
+
     class rewards(R1_12DofControllerCfg.rewards):
         # Stage-two precision curriculum. These values divide squared errors,
         # so 0.01 corresponds to a characteristic position error of 0.10 m.
@@ -57,6 +63,7 @@ class R1FootholdTrackerCfg(R1_12DofControllerCfg):
         touchdown_tracking_sigma = 0.01
         stance_tracking_sigma = 0.01
         touchdown_phase = 0.70
+        contact_force_threshold = 5.0
         foot_clearance = 0.07
         swing_knee_height = 0.20
 
@@ -67,7 +74,9 @@ class R1FootholdTrackerCfg(R1_12DofControllerCfg):
             swing_foot_xy_tracking = 4.0
             swing_foot_z_tracking = 0.5
             swing_foot_yaw_tracking = 0.5
-            touchdown_accuracy = 6.0
+            # Touchdown is an impulse-like one-step event. The larger weight
+            # compensates for the framework's global dt reward scaling.
+            touchdown_accuracy = 40.0
             stance_accuracy_latched = 3.0
             stance_contact = 4.0
             flight = 4.0

@@ -73,7 +73,9 @@ def diagnose(args):
                     env.phase[:, 0] * 2.0,
                     (env.phase[:, 0] - 0.5) * 2.0,
                 )
-                touchdown = swing_contact & (
+                touchdown = env.touchdown_event[
+                    batch, env.swing_foot_index
+                ] & (
                     local_phase > env.cfg.rewards.touchdown_phase
                 )
                 touchdown_samples += touchdown.sum().item()

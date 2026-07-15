@@ -82,6 +82,7 @@ class RandomFootholdGoalSampler(FootholdGoalGenerator):
         stance_yaw = yaw[batch, stance]
 
         length = self._uniform(*self.cfg.step_length_range, count)
+        width = self._uniform(*self.cfg.step_width_range, count)
         direction_offset = torch.deg2rad(
             self._uniform(*self.cfg.direction_offset_deg, count)
         )
@@ -92,9 +93,13 @@ class RandomFootholdGoalSampler(FootholdGoalGenerator):
         world_direction = wrap_to_pi(self.theta_move[selected] + direction_offset)
         local_direction = wrap_to_pi(world_direction - stance_yaw)
         local_x = length * torch.cos(local_direction)
-        local_y = length * torch.sin(local_direction)
+        direction_y = length * torch.sin(local_direction)
         local_x = local_x.clamp(self.cfg.reach_x[0], self.cfg.reach_x[1])
-        local_y = local_y.clamp(self.cfg.reach_y[0], self.cfg.reach_y[1])
+        local_y = torch.where(
+            swing == LEFT_FOOT,
+            width + direction_y,
+            -width + direction_y,
+        ).clamp(self.cfg.reach_y[0], self.cfg.reach_y[1])
         local_y = torch.where(
             swing == LEFT_FOOT,
             local_y.clamp(min=self.cfg.min_lateral_separation),
@@ -127,4 +132,3 @@ class RandomFootholdGoalSampler(FootholdGoalGenerator):
 
     def get_goal(self):
         return self.goal
-
