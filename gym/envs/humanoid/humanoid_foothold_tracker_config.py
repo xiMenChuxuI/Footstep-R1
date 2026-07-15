@@ -48,20 +48,27 @@ class R1FootholdTrackerCfg(R1_12DofControllerCfg):
         push_robots = False
 
     class rewards(R1_12DofControllerCfg.rewards):
+        # Stage-two precision curriculum. These values divide squared errors,
+        # so 0.01 corresponds to a characteristic position error of 0.10 m.
         foothold_tracking_sigma = 0.04
+        swing_xy_tracking_sigma = 0.02
+        swing_z_tracking_sigma = 0.01
+        swing_yaw_tracking_sigma = 0.04
+        touchdown_tracking_sigma = 0.01
+        stance_tracking_sigma = 0.01
         touchdown_phase = 0.70
         foot_clearance = 0.07
         swing_knee_height = 0.20
 
         class weights(R1_12DofControllerCfg.rewards.weights):
-            tracking_lin_vel_world = 2.0
+            tracking_lin_vel_world = 1.5
             joint_regularization = 0.5
             contact_schedule = 0.0
-            swing_foot_xy_tracking = 3.0
+            swing_foot_xy_tracking = 4.0
             swing_foot_z_tracking = 0.5
             swing_foot_yaw_tracking = 0.5
-            touchdown_accuracy = 4.0
-            stance_accuracy_latched = 2.0
+            touchdown_accuracy = 6.0
+            stance_accuracy_latched = 3.0
             stance_contact = 4.0
             flight = 4.0
             # A swing foot that remains planted must cost more than the stance

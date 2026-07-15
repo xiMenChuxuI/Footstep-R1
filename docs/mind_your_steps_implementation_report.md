@@ -170,6 +170,48 @@ not reported as policy convergence.
 - LIPM and IPC3D adapters are implemented but are not selected by the default
   random-goal task configuration; connecting a concrete planner callback is a
   separate experiment and does not alter the existing planners.
-- Two fresh 50-iteration diagnostic runs were performed after the smoke test.
-  No claim about long-horizon PPO convergence is made, and no long training job
-  was started.
+- Two fresh 50-iteration diagnostic runs were initially performed after the
+  smoke test. The later stage-two run described below is a bounded 500-iteration
+  precision experiment, not a claim of final policy convergence.
+
+## Stage-Two Precision Fine-Tuning
+
+After preserving the stage-one implementation in Git commit `6e9d5cc`, the
+foothold reward was split into independent XY, Z, yaw, touchdown, and latched
+stance scales. Swing Z endpoint tracking is now active only after the configured
+touchdown phase; the sinusoidal clearance reward owns the earlier swing path.
+XY/touchdown/stance weights were increased to `4/6/3`, while world velocity
+tracking was reduced from `2.0` to `1.5`.
+
+The latest stage-one `model_500.pt` was loaded with its optimizer state and
+fine-tuned for 500 additional PPO iterations using 1024 environments. The run
+completed at `model_1000.pt` without NaN, CUDA, tensor-shape, or PhysX errors:
+
+```text
+run: Jul13_15-55-55_r1_stage2_precision_sigma02
+total stage-two timesteps: 12,288,000
+stage-two wall time: 446.03 s
+final episode length: 1001.00
+final termination reward: 0.0000
+```
+
+Independent 64-environment inference diagnostics over 200 sampled steps gave:
+
+```text
+world forward speed:          0.4969 m/s
+stance contact ratio:         0.9762
+flight ratio:                 0.0002
+double support ratio:         0.2867
+mean swing XY error:          0.1183 m
+mean touchdown XY error:      0.1204 m
+mean touchdown X error:       0.0848 m
+mean touchdown Y error:       0.0667 m
+mean touchdown yaw error:     0.0290 rad
+contact-foot slip speed:      0.0276 m/s
+resets:                       1
+```
+
+This is a measurable improvement over the roughly 13.1 cm stage-one touchdown
+error while preserving stable forward locomotion, but it does not yet satisfy a
+5 cm precision target. Further work should focus on first-contact event rewards
+and a narrower foothold curriculum instead of increasing support rewards.

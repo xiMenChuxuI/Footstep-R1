@@ -102,7 +102,7 @@ class R1FootholdTracker(Hicl12Controller):
         target_yaw = self.goal_generator.world_target_yaw[ids, foot]
         xy_error = torch.norm(position[ids][batch, foot, :2] - target_pos[:, :2], dim=-1)
         yaw_error = torch.abs(wrap_to_pi(yaw[ids][batch, foot] - target_yaw))
-        sigma = self.cfg.rewards.foothold_tracking_sigma
+        sigma = self.cfg.rewards.stance_tracking_sigma
         self.stance_accuracy_latched[ids] = torch.exp(
             -(xy_error.square() + 0.25 * yaw_error.square()) / sigma
         )
@@ -134,33 +134,45 @@ class R1FootholdTracker(Hicl12Controller):
             contact[batch, swing],
         )
 
-    def _tracking_reward(self, squared_error):
-        return torch.exp(
-            -squared_error / self.cfg.rewards.foothold_tracking_sigma
-        )
+    def _tracking_reward(self, squared_error, sigma=None):
+        if sigma is None:
+            sigma = self.cfg.rewards.foothold_tracking_sigma
+        return torch.exp(-squared_error / sigma)
 
-    def _reward_swing_foot_xy_tracking(self):
-        error, _, _ = self._swing_tracking_errors()
-        return self._tracking_reward(torch.sum(error[:, :2].square(), dim=-1))
-
-    def _reward_swing_foot_z_tracking(self):
-        error, _, _ = self._swing_tracking_errors()
-        return self._tracking_reward(error[:, 2].square())
-
-    def _reward_swing_foot_yaw_tracking(self):
-        _, error, _ = self._swing_tracking_errors()
-        return self._tracking_reward(error.square())
-
-    def _reward_touchdown_accuracy(self):
-        error, yaw_error, contact = self._swing_tracking_errors()
-        local_phase = torch.where(
+    def _local_phase(self):
+        return torch.where(
             self.phase[:, 0] < 0.5,
             self.phase[:, 0] * 2.0,
             (self.phase[:, 0] - 0.5) * 2.0,
         )
+
+    def _reward_swing_foot_xy_tracking(self):
+        error, _, _ = self._swing_tracking_errors()
+        return self._tracking_reward(
+            torch.sum(error[:, :2].square(), dim=-1),
+            self.cfg.rewards.swing_xy_tracking_sigma,
+        )
+
+    def _reward_swing_foot_z_tracking(self):
+        error, _, _ = self._swing_tracking_errors()
+        late_swing = self._local_phase() > self.cfg.rewards.touchdown_phase
+        return late_swing.float() * self._tracking_reward(
+            error[:, 2].square(), self.cfg.rewards.swing_z_tracking_sigma
+        )
+
+    def _reward_swing_foot_yaw_tracking(self):
+        _, error, _ = self._swing_tracking_errors()
+        return self._tracking_reward(
+            error.square(), self.cfg.rewards.swing_yaw_tracking_sigma
+        )
+
+    def _reward_touchdown_accuracy(self):
+        error, yaw_error, contact = self._swing_tracking_errors()
+        local_phase = self._local_phase()
         touchdown = contact & (local_phase > self.cfg.rewards.touchdown_phase)
         accuracy = self._tracking_reward(
-            torch.sum(error.square(), dim=-1) + 0.25 * yaw_error.square()
+            torch.sum(error.square(), dim=-1) + 0.25 * yaw_error.square(),
+            self.cfg.rewards.touchdown_tracking_sigma,
         )
         return accuracy * touchdown.float()
 
@@ -179,11 +191,7 @@ class R1FootholdTracker(Hicl12Controller):
     def _reward_early_swing_contact(self):
         _, _, contact, _ = self._canonical_foot_values()
         batch = torch.arange(self.num_envs, device=self.device)
-        local_phase = torch.where(
-            self.phase[:, 0] < 0.5,
-            self.phase[:, 0] * 2.0,
-            (self.phase[:, 0] - 0.5) * 2.0,
-        )
+        local_phase = self._local_phase()
         early_contact = contact[batch, self.swing_foot_index] & (
             local_phase < self.cfg.rewards.touchdown_phase
         )
@@ -194,11 +202,7 @@ class R1FootholdTracker(Hicl12Controller):
         batch = torch.arange(self.num_envs, device=self.device)
         swing = self.swing_foot_index
         stance = self.stance_foot_index
-        local_phase = torch.where(
-            self.phase[:, 0] < 0.5,
-            self.phase[:, 0] * 2.0,
-            (self.phase[:, 0] - 0.5) * 2.0,
-        )
+        local_phase = self._local_phase()
         desired = self.cfg.rewards.foot_clearance * torch.sin(torch.pi * local_phase)
         clearance = position[batch, swing, 2] - position[batch, stance, 2]
         return self._tracking_reward((clearance - desired).square())

@@ -16,6 +16,7 @@ from gym.envs.humanoid.humanoid_foothold_tracker_config import (
     R1FootholdTrackerCfg,
     R1FootholdTrackerRunnerCfg,
 )
+from gym.envs.humanoid.humanoid_foothold_tracker import R1FootholdTracker
 from gym.utils.math import wrap_to_pi
 
 
@@ -125,8 +126,36 @@ class FootholdGoalTests(unittest.TestCase):
             env_cfg.rewards.weights.stance_contact,
         )
         self.assertGreater(env_cfg.rewards.weights.tracking_lin_vel_world, 0.0)
+        self.assertAlmostEqual(env_cfg.rewards.swing_xy_tracking_sigma, 0.02)
+        self.assertAlmostEqual(env_cfg.rewards.touchdown_tracking_sigma, 0.01)
+        self.assertAlmostEqual(env_cfg.rewards.stance_tracking_sigma, 0.01)
+        self.assertGreater(
+            env_cfg.rewards.weights.touchdown_accuracy,
+            env_cfg.rewards.weights.swing_foot_xy_tracking,
+        )
         self.assertNotIn("foot_contact_state", runner_cfg.policy.actor_obs)
         self.assertIn("foot_contact_state", runner_cfg.policy.critic_obs)
+
+    def test_swing_z_endpoint_reward_is_late_phase_only(self):
+        tracker = R1FootholdTracker.__new__(R1FootholdTracker)
+        tracker.phase = torch.tensor([[0.10], [0.45]])
+        tracker.cfg = SimpleNamespace(
+            rewards=SimpleNamespace(
+                touchdown_phase=0.70,
+                swing_z_tracking_sigma=0.01,
+            )
+        )
+        error = torch.tensor([[0.0, 0.0, 0.05], [0.0, 0.0, 0.05]])
+        tracker._swing_tracking_errors = lambda: (
+            error,
+            torch.zeros(2),
+            torch.zeros(2, dtype=torch.bool),
+        )
+
+        reward = tracker._reward_swing_foot_z_tracking()
+
+        self.assertEqual(reward[0].item(), 0.0)
+        self.assertGreater(reward[1].item(), 0.0)
 
 
 if __name__ == "__main__":

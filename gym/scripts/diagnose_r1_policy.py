@@ -40,6 +40,8 @@ def diagnose(args):
     action_rms = []
     swing_xy_error = []
     touchdown_xy_error_sum = 0.0
+    touchdown_x_error_sum = 0.0
+    touchdown_y_error_sum = 0.0
     touchdown_yaw_error_sum = 0.0
     touchdown_samples = 0
     contact_slip_speed_sum = 0.0
@@ -78,6 +80,8 @@ def diagnose(args):
                 touchdown_xy_error_sum += (
                     tracking_error[touchdown, :2].norm(dim=-1).sum().item()
                 )
+                touchdown_x_error_sum += tracking_error[touchdown, 0].abs().sum().item()
+                touchdown_y_error_sum += tracking_error[touchdown, 1].abs().sum().item()
                 touchdown_yaw_error_sum += yaw_error[touchdown].abs().sum().item()
                 foot_xy_velocity = env.rigid_body_state[
                     :, env.feet_ids, 7:9
@@ -98,6 +102,8 @@ def diagnose(args):
     print(f"mean_swing_xy_error: {sum(swing_xy_error) / len(swing_xy_error):.4f} m")
     if touchdown_samples:
         print(f"mean_touchdown_xy_error: {touchdown_xy_error_sum / touchdown_samples:.4f} m")
+        print(f"mean_touchdown_x_error: {touchdown_x_error_sum / touchdown_samples:.4f} m")
+        print(f"mean_touchdown_y_error: {touchdown_y_error_sum / touchdown_samples:.4f} m")
         print(f"mean_touchdown_yaw_error: {touchdown_yaw_error_sum / touchdown_samples:.4f} rad")
     print(f"touchdown_samples: {touchdown_samples}")
     if contact_slip_samples:
