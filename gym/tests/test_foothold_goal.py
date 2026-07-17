@@ -5,7 +5,11 @@ from types import SimpleNamespace
 import isaacgym
 import torch
 
-from gym.envs.guidance.foothold_goal_sampler import RandomFootholdGoalSampler
+from gym.envs.guidance.foothold_goal_sampler import (
+    RandomFootholdGoalSampler,
+    TerrainAwareFootholdGoalSampler,
+    sample_heightfield,
+)
 from gym.envs.guidance.stance_foot_adapter import (
     LEFT_FOOT,
     RIGHT_FOOT,
@@ -17,6 +21,10 @@ from gym.envs.humanoid.humanoid_foothold_tracker_config import (
     R1FootholdTrackerRunnerCfg,
 )
 from gym.envs.humanoid.humanoid_foothold_tracker import R1FootholdTracker
+from gym.envs.humanoid.humanoid_foothold_tracker_rough_config import (
+    R1RoughFootholdTrackerCfg,
+    R1RoughFootholdTrackerRunnerCfg,
+)
 from gym.utils.math import wrap_to_pi
 
 
@@ -48,6 +56,22 @@ def sampler_cfg():
         reach_y=[-0.30, 0.30],
         min_lateral_separation=0.12,
     )
+
+
+def terrain_sampler_cfg():
+    cfg = sampler_cfg()
+    cfg.step_length_range = [0.10, 0.10]
+    cfg.step_width_range = [0.20, 0.20]
+    cfg.direction_offset_deg = [0.0, 0.0]
+    cfg.yaw_offset_deg = [0.0, 0.0]
+    cfg.hold_probability = 0.0
+    cfg.movement_direction_deg = [0.0, 0.0]
+    cfg.feet_direction_deg = [0.0, 0.0]
+    cfg.num_candidates = 4
+    cfg.support_patch_half_extents = [0.06, 0.035]
+    cfg.max_support_height_variation = 0.035
+    cfg.max_step_height = 0.12
+    return cfg
 
 
 class FootholdGoalTests(unittest.TestCase):
@@ -103,6 +127,66 @@ class FootholdGoalTests(unittest.TestCase):
         sampler.reset(torch.arange(env.num_envs))
         self.assertEqual(tuple(sampler.get_goal().shape), (7, 10))
 
+    def test_route_overrides_persist_across_reset(self):
+        env = MockEnv(3)
+        sampler = RandomFootholdGoalSampler(env, sampler_cfg())
+        ids = torch.arange(env.num_envs)
+        headings = torch.tensor([-0.2, 0.0, 0.3])
+        scales = torch.tensor([0.8, 1.0, 1.2])
+        sampler.set_route_overrides(ids, headings, scales)
+        sampler.reset(ids)
+        torch.testing.assert_close(sampler.theta_move, headings)
+        torch.testing.assert_close(sampler.theta_feet, headings)
+        torch.testing.assert_close(sampler.step_length_scale, scales)
+
+    def test_heightfield_sampling(self):
+        height_samples = torch.zeros(12, 12)
+        height_samples[6:8, 7:9] = 20
+        points = torch.tensor([[1.0, 2.0], [-5.0, -5.0]])
+        heights = sample_heightfield(
+            height_samples,
+            points,
+            border_size=5.0,
+            horizontal_scale=1.0,
+            vertical_scale=0.005,
+        )
+        torch.testing.assert_close(heights, torch.tensor([0.1, 0.0]))
+
+    def test_terrain_sampler_uses_surface_height(self):
+        env = MockEnv(3)
+        env.height_samples = torch.full((120, 120), 20.0)
+        env.foot_states[:, :, 2] = 0.10
+        env.terrain = SimpleNamespace(
+            cfg=SimpleNamespace(
+                border_size=5.0,
+                horizontal_scale=0.1,
+                vertical_scale=0.005,
+            )
+        )
+        sampler = TerrainAwareFootholdGoalSampler(env, terrain_sampler_cfg())
+        sampler.reset(torch.arange(env.num_envs))
+        target = sampler.world_target_pos[:, LEFT_FOOT]
+        torch.testing.assert_close(target[:, 2], torch.full((3,), 0.10))
+        self.assertFalse(sampler.hold_still.any().item())
+
+    def test_terrain_sampler_holds_when_height_is_unreachable(self):
+        env = MockEnv(2)
+        env.height_samples = torch.full((120, 120), 100.0)
+        env.terrain = SimpleNamespace(
+            cfg=SimpleNamespace(
+                border_size=5.0,
+                horizontal_scale=0.1,
+                vertical_scale=0.005,
+            )
+        )
+        sampler = TerrainAwareFootholdGoalSampler(env, terrain_sampler_cfg())
+        sampler.reset(torch.arange(env.num_envs))
+        expected = env.foot_states[:, 1, :3]
+        torch.testing.assert_close(
+            sampler.world_target_pos[:, LEFT_FOOT], expected
+        )
+        self.assertTrue(sampler.hold_still.all().item())
+
     def test_r1_task_configuration(self):
         env_cfg = R1FootholdTrackerCfg()
         runner_cfg = R1FootholdTrackerRunnerCfg()
@@ -137,6 +221,17 @@ class FootholdGoalTests(unittest.TestCase):
         )
         self.assertNotIn("foot_contact_state", runner_cfg.policy.actor_obs)
         self.assertIn("foot_contact_state", runner_cfg.policy.critic_obs)
+
+    def test_rough_task_preserves_policy_contract(self):
+        flat_runner = R1FootholdTrackerRunnerCfg()
+        env_cfg = R1RoughFootholdTrackerCfg()
+        runner_cfg = R1RoughFootholdTrackerRunnerCfg()
+        self.assertEqual(env_cfg.terrain.mesh_type, "trimesh")
+        self.assertTrue(env_cfg.terrain.curriculum)
+        self.assertEqual(env_cfg.terrain.max_init_terrain_level, 0)
+        self.assertEqual(env_cfg.foothold_goal.num_candidates, 8)
+        self.assertEqual(runner_cfg.policy.actor_obs, flat_runner.policy.actor_obs)
+        self.assertEqual(runner_cfg.policy.critic_obs, flat_runner.policy.critic_obs)
 
     def test_swing_trajectory_reference(self):
         tracker = R1FootholdTracker.__new__(R1FootholdTracker)

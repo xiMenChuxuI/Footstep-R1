@@ -85,14 +85,16 @@ class Terrain:
     def curriculum(self):
         for j in range(self.cfg.num_cols):
             for i in range(self.cfg.num_rows):
-                difficulty = i / self.cfg.num_rows
+                difficulty = (
+                    i / self.cfg.num_rows * getattr(self.cfg, "max_difficulty", 1.0)
+                )
                 choice = j / self.cfg.num_cols + 0.001
 
                 terrain = self.make_terrain(choice, difficulty)
                 self.add_terrain_to_map(terrain, i, j)
 
     def selected_terrain(self):
-        terrain_type = self.cfg.terrain_kwargs.pop('type')
+        terrain_type = self.cfg.terrain_kwargs['type']
         for k in range(self.cfg.num_sub_terrains):
             # Env coordinates in the world
             (i, j) = np.unravel_index(k, (self.cfg.num_rows, self.cfg.num_cols))
@@ -104,6 +106,18 @@ class Terrain:
                 terrain = self.make_random_uniform_terrain(self.cfg.difficulty, self.cfg.platform_size)
             elif terrain_type == 'gap':
                 terrain = self.make_gap_terrain(self.cfg.difficulty, self.cfg.platform_size)
+            elif terrain_type in ('stairs_up', 'stairs_down'):
+                terrain = self.make_stairs_terrain(
+                    self.cfg.difficulty,
+                    self.cfg.platform_size,
+                    outward_ascending=terrain_type == 'stairs_up',
+                )
+            elif terrain_type == 'discrete_obstacles':
+                terrain = self.make_discrete_obstacles_terrain(
+                    self.cfg.difficulty, self.cfg.platform_size
+                )
+            else:
+                raise ValueError(f"Unsupported selected terrain type: {terrain_type}")
         
             # terrain = terrain_utils.SubTerrain("terrain",
             #                   width=self.width_per_env_pixels,
@@ -133,8 +147,15 @@ class Terrain:
                 slope *= -1
             terrain_utils.pyramid_sloped_terrain(terrain, slope=slope, platform_size=3.)
         elif choice < self.proportions[1]:
-            # terrain_utils.pyramid_sloped_terrain(terrain, slope=slope, platform_size=3.)
-            terrain_utils.random_uniform_terrain(terrain, min_height=-0.05, max_height=0.05, step=0.005, downsampled_scale=0.2)
+            rough_height = 0.01 + 0.04 * difficulty
+            rough_step = max(self.cfg.vertical_scale, 0.01 * difficulty)
+            terrain_utils.random_uniform_terrain(
+                terrain,
+                min_height=-rough_height,
+                max_height=rough_height,
+                step=rough_step,
+                downsampled_scale=0.2,
+            )
         elif choice < self.proportions[3]:
             if choice<self.proportions[2]:
                 step_height *= -1
@@ -197,10 +218,11 @@ class Terrain:
                                 vertical_scale=self.cfg.vertical_scale,
                                 horizontal_scale=self.cfg.horizontal_scale)
         
-        step = 0.01 * difficulty
+        rough_height = 0.01 + 0.04 * difficulty
+        step = max(self.cfg.vertical_scale, 0.01 * difficulty)
         terrain_utils.random_uniform_terrain(terrain, 
-                                             min_height=-0.05, 
-                                             max_height=0.05, 
+                                             min_height=-rough_height,
+                                             max_height=rough_height,
                                              step=step, 
                                              downsampled_scale=0.2)
 
@@ -232,6 +254,45 @@ class Terrain:
                                              slope=slope, 
                                              platform_size=platform_size)
 
+        return terrain
+
+    def make_stairs_terrain(self, difficulty, platform_size, outward_ascending=False):
+        terrain = terrain_utils.SubTerrain(
+            "terrain",
+            width=self.width_per_env_pixels,
+            length=self.width_per_env_pixels,
+            vertical_scale=self.cfg.vertical_scale,
+            horizontal_scale=self.cfg.horizontal_scale,
+        )
+        step_height = 0.05 + 0.18 * difficulty
+        # Environments spawn on the center platform and travel outward. Isaac
+        # Gym's positive pyramid steps descend in that direction.
+        if outward_ascending:
+            step_height *= -1.0
+        terrain_utils.pyramid_stairs_terrain(
+            terrain,
+            step_width=0.31,
+            step_height=step_height,
+            platform_size=platform_size,
+        )
+        return terrain
+
+    def make_discrete_obstacles_terrain(self, difficulty, platform_size):
+        terrain = terrain_utils.SubTerrain(
+            "terrain",
+            width=self.width_per_env_pixels,
+            length=self.width_per_env_pixels,
+            vertical_scale=self.cfg.vertical_scale,
+            horizontal_scale=self.cfg.horizontal_scale,
+        )
+        terrain_utils.discrete_obstacles_terrain(
+            terrain,
+            max_height=0.05 + 0.2 * difficulty,
+            min_size=1.0,
+            max_size=2.0,
+            num_rects=20,
+            platform_size=platform_size,
+        )
         return terrain
 
 def gap_terrain(terrain, gap_size, platform_size=1.):

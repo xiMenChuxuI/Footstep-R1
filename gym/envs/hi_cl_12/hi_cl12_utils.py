@@ -134,11 +134,16 @@ class SimpleLineGeometry(LineGeometry):
 class FootStepGeometry(LineGeometry):
     def __init__(self, step_location:torch.Tensor, step_orientation:torch.Tensor, color:Tuple):
         """
-        step_location: foot step location of Humanoid (x, y)
+        step_location: foot step location of Humanoid (x, y) or (x, y, z)
         step_orientation: foot step orientation of Humanoid (heading) [rad]  
         """
         self.device = step_location.device
-        step_location = torch.tensor([*step_location, 0.], device=self.device) # (x, y, 0)
+        if step_location.numel() == 2:
+            step_location = torch.cat(
+                (step_location, torch.zeros(1, device=self.device, dtype=step_location.dtype))
+            )
+        else:
+            step_location = step_location[:3]
 
         angle = torch.tensor([60]) # angle between each point on circle's circumference
         num_lines = int(360/angle.item()) + 1
@@ -245,4 +250,4 @@ def smart_sort(x, permutation):
         torch.arange(d1).unsqueeze(1).repeat((1, d2)).flatten(),
         permutation.flatten()
     ].view(d1, d2)
-    return ret  
+    return ret

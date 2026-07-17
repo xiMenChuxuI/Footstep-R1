@@ -935,8 +935,18 @@ class LeggedRobot(BaseTask):
             # put robots at the origins defined by the terrain
             max_init_level = self.cfg.terrain.max_init_terrain_level
             if not self.cfg.terrain.curriculum: max_init_level = self.cfg.terrain.num_rows - 1
-            self.terrain_levels = torch.randint(0, max_init_level+1, (self.num_envs,), device=self.device)
-            self.terrain_types = torch.div(torch.arange(self.num_envs, device=self.device), (self.num_envs/self.cfg.terrain.num_cols), rounding_mode='floor').to(torch.long)
+            selected_capacity = self.cfg.terrain.num_rows * self.cfg.terrain.num_cols
+            if self.cfg.terrain.selected and selected_capacity >= self.num_envs:
+                terrain_ids = torch.arange(self.num_envs, device=self.device)
+                self.terrain_levels = torch.div(
+                    terrain_ids, self.cfg.terrain.num_cols, rounding_mode='floor'
+                ).to(torch.long)
+                self.terrain_types = torch.remainder(
+                    terrain_ids, self.cfg.terrain.num_cols
+                ).to(torch.long)
+            else:
+                self.terrain_levels = torch.randint(0, max_init_level+1, (self.num_envs,), device=self.device)
+                self.terrain_types = torch.div(torch.arange(self.num_envs, device=self.device), (self.num_envs/self.cfg.terrain.num_cols), rounding_mode='floor').to(torch.long)
             self.max_terrain_level = self.cfg.terrain.num_rows
             self.terrain_origins = torch.from_numpy(self.terrain.env_origins).to(self.device).to(torch.float)
             self.env_origins[:] = self.terrain_origins[self.terrain_levels, self.terrain_types]

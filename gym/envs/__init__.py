@@ -46,6 +46,11 @@ from .humanoid.humanoid_foothold_tracker_config import (
     R1FootholdTrackerCfg,
     R1FootholdTrackerRunnerCfg,
 )
+from .humanoid.humanoid_foothold_tracker_rough import R1RoughFootholdTracker
+from .humanoid.humanoid_foothold_tracker_rough_config import (
+    R1RoughFootholdTrackerCfg,
+    R1RoughFootholdTrackerRunnerCfg,
+)
 from .hi_cl_12.hi_cl12_controller import Hicl12Controller
 from .hi_cl_12.r1_12dof_controller_config import (
     R1_12DofControllerCfg,
@@ -70,6 +75,12 @@ task_registry.register(
     R1FootholdTracker,
     R1FootholdTrackerCfg,
     R1FootholdTrackerRunnerCfg,
+)
+task_registry.register(
+    "r1_foothold_tracker_rough",
+    R1RoughFootholdTracker,
+    R1RoughFootholdTrackerCfg,
+    R1RoughFootholdTrackerRunnerCfg,
 )
 task_registry.register(
     "r1_12dof_controller",

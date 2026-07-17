@@ -162,8 +162,10 @@ class R1FootholdTracker(Hicl12Controller):
         for env_id in range(self.num_envs):
             # Actual feet: left cyan, right magenta.
             for foot, color in ((LEFT_FOOT, (0.0, 1.0, 1.0)), (RIGHT_FOOT, (1.0, 0.0, 1.0))):
+                actual_location = position[env_id, foot].clone()
+                actual_location[2] += 0.012
                 actual = FootStepGeometry(
-                    position[env_id, foot, :2], yaw[env_id, foot], color=color
+                    actual_location, yaw[env_id, foot], color=color
                 )
                 gymutil.draw_lines(
                     actual, self.gym, self.viewer, self.envs[env_id], pose=None
@@ -172,8 +174,10 @@ class R1FootholdTracker(Hicl12Controller):
             # Active targets: left blue, right red. One is the current stance
             # pose and the other is the phase-latched swing target.
             for foot, color in ((LEFT_FOOT, (0.0, 0.0, 1.0)), (RIGHT_FOOT, (1.0, 0.0, 0.0))):
+                target_location = target_pos[env_id, foot].clone()
+                target_location[2] += 0.018
                 target = FootStepGeometry(
-                    target_pos[env_id, foot, :2], target_yaw[env_id, foot], color=color
+                    target_location, target_yaw[env_id, foot], color=color
                 )
                 gymutil.draw_lines(
                     target, self.gym, self.viewer, self.envs[env_id], pose=None
