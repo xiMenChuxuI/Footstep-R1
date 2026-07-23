@@ -9,6 +9,13 @@ from gym.utils import get_args, task_registry
 
 def diagnose(args):
     env_cfg, train_cfg = task_registry.get_cfgs(args)
+    if args.task == "r1_foothold_tracker_random":
+        if args.foothold_jitter_x is not None:
+            jitter_x = abs(args.foothold_jitter_x)
+            env_cfg.foothold_goal.jitter_x_range = [-jitter_x, jitter_x]
+        if args.foothold_jitter_y is not None:
+            jitter_y = abs(args.foothold_jitter_y)
+            env_cfg.foothold_goal.jitter_y_range = [-jitter_y, jitter_y]
     env_cfg.env.num_envs = 64
     env_cfg.env.episode_length_s = 100
     env_cfg.init_state.pos[2] = 0.715

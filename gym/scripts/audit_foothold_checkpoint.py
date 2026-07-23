@@ -34,10 +34,19 @@ def audit(args):
     env_cfg, train_cfg = task_registry.get_cfgs(args)
     env_cfg.env.num_envs = GROUP_SIZE * len(GROUPS)
     env_cfg.env.episode_length_s = 100
-    # Match play.py: the checkpoint receives no velocity command through the actor.
-    env_cfg.commands.ranges.lin_vel_x = [0.0, 0.0]
-    env_cfg.commands.ranges.lin_vel_y = 0.0
-    env_cfg.commands.ranges.yaw_vel = 0.0
+    random_foothold_task = args.task == "r1_foothold_tracker_random"
+    if random_foothold_task:
+        if args.foothold_jitter_x is not None:
+            jitter_x = abs(args.foothold_jitter_x)
+            env_cfg.foothold_goal.jitter_x_range = [-jitter_x, jitter_x]
+        if args.foothold_jitter_y is not None:
+            jitter_y = abs(args.foothold_jitter_y)
+            env_cfg.foothold_goal.jitter_y_range = [-jitter_y, jitter_y]
+    else:
+        # Legacy play uses zero velocity; its footholds are sampled independently.
+        env_cfg.commands.ranges.lin_vel_x = [0.0, 0.0]
+        env_cfg.commands.ranges.lin_vel_y = 0.0
+        env_cfg.commands.ranges.yaw_vel = 0.0
     env_cfg.terrain.mesh_type = "plane"
     env_cfg.terrain.measure_heights = False
     env_cfg.domain_rand.randomize_friction = False

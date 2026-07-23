@@ -210,6 +210,10 @@ def get_args():
          "help": "Width of each 2x2 video tile."},
         {"name": "--video_height", "type": int, "default": 360,
          "help": "Height of each 2x2 video tile."},
+        {"name": "--foothold_jitter_x", "type": float,
+         "help": "Play-time symmetric foothold X jitter in metres."},
+        {"name": "--foothold_jitter_y", "type": float,
+         "help": "Play-time symmetric foothold Y jitter in metres."},
     ]
     # parse arguments
     args = gymutil.parse_arguments(

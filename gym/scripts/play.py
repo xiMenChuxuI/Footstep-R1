@@ -43,6 +43,12 @@ import torch
 
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(args)
+    random_foothold_task = args.task == "r1_foothold_tracker_random"
+    if random_foothold_task:
+        jitter_x = 0.08 if args.foothold_jitter_x is None else abs(args.foothold_jitter_x)
+        jitter_y = 0.10 if args.foothold_jitter_y is None else abs(args.foothold_jitter_y)
+        env_cfg.foothold_goal.jitter_x_range = [-jitter_x, jitter_x]
+        env_cfg.foothold_goal.jitter_y_range = [-jitter_y, jitter_y]
     requested_video_envs = 4 if args.video_2x2 else 1
     env_cfg.env.num_envs = max(requested_video_envs, min(env_cfg.env.num_envs, 9))
     env_cfg.env.env_spacing = 2.
@@ -62,9 +68,10 @@ def play(args):
     env_cfg.viewer.pos = [0, -2.5, .5] # [0, -3.5, 3]
     # env_cfg.viewer.lookat = [0, 0, 0] # [1, 1.5, 0]
     env_cfg.viewer.lookat = [0, 0.5, 0] # [1, 1.5, 0]
-    env_cfg.commands.ranges.lin_vel_x = [0., 0.] # [0., 0.], [-2., 2.]
-    env_cfg.commands.ranges.lin_vel_y = 0. # 0., 1.
-    env_cfg.commands.ranges.yaw_vel = 0. # 0., 1.
+    if not random_foothold_task:
+        env_cfg.commands.ranges.lin_vel_x = [0., 0.] # [0., 0.], [-2., 2.]
+        env_cfg.commands.ranges.lin_vel_y = 0. # 0., 1.
+        env_cfg.commands.ranges.yaw_vel = 0. # 0., 1.
 
     if env_cfg.__class__.__name__ == 'HumanoidControllerCfg':
         env_cfg.commands.adjust_step_command = False # True, False

@@ -47,7 +47,10 @@ class R1FootholdTracker(Hicl12Controller):
         self.last_touchdown_pos = torch.zeros(n, 3, device=device)
         self.last_touchdown_target = torch.zeros(n, 3, device=device)
         self.has_touchdown_visual = torch.zeros(n, dtype=torch.bool, device=device)
-        self.goal_generator = RandomFootholdGoalSampler(self, self.cfg.foothold_goal)
+        self.goal_generator = self._create_goal_generator()
+
+    def _create_goal_generator(self):
+        return RandomFootholdGoalSampler(self, self.cfg.foothold_goal)
 
     def _calculate_foot_states(self, foot_states):
         """Move R1 ankle-link poses to the configured sole contact center."""
@@ -149,6 +152,12 @@ class R1FootholdTracker(Hicl12Controller):
         position, yaw, _, _ = self._canonical_foot_values()
         target_pos = self.goal_generator.world_target_pos
         target_yaw = self.goal_generator.world_target_yaw
+        nominal_pos = getattr(
+            self.goal_generator, "nominal_world_target_pos", None
+        )
+        nominal_yaw = getattr(
+            self.goal_generator, "nominal_world_target_yaw", None
+        )
         stance_sphere = gymutil.WireframeSphereGeometry(
             0.018, 6, 6, None, color=(1.0, 1.0, 0.0)
         )
@@ -181,6 +190,27 @@ class R1FootholdTracker(Hicl12Controller):
 
             stance = self.stance_foot_index[env_id].item()
             swing = self.swing_foot_index[env_id].item()
+            if nominal_pos is not None:
+                nominal = FootStepGeometry(
+                    nominal_pos[env_id, swing, :2],
+                    nominal_yaw[env_id, swing],
+                    color=(0.85, 0.85, 0.85),
+                )
+                gymutil.draw_lines(
+                    nominal, self.gym, self.viewer, self.envs[env_id], pose=None
+                )
+                perturbation = SimpleLineGeometry(
+                    nominal_pos[env_id, swing],
+                    target_pos[env_id, swing],
+                    color=(1.0, 1.0, 0.0),
+                )
+                gymutil.draw_lines(
+                    perturbation,
+                    self.gym,
+                    self.viewer,
+                    self.envs[env_id],
+                    pose=None,
+                )
             stance_pose = gymapi.Transform(
                 gymapi.Vec3(*position[env_id, stance].tolist()), r=None
             )

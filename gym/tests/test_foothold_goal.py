@@ -6,6 +6,9 @@ import isaacgym
 import torch
 
 from gym.envs.guidance.foothold_goal_sampler import RandomFootholdGoalSampler
+from gym.envs.guidance.perturbed_foothold_goal_sampler import (
+    PerturbedFootholdGoalSampler,
+)
 from gym.envs.guidance.stance_foot_adapter import (
     LEFT_FOOT,
     RIGHT_FOOT,
@@ -17,6 +20,10 @@ from gym.envs.humanoid.humanoid_foothold_tracker_config import (
     R1FootholdTrackerRunnerCfg,
 )
 from gym.envs.humanoid.humanoid_foothold_tracker import R1FootholdTracker
+from gym.envs.humanoid.humanoid_random_foothold_tracker_config import (
+    R1RandomFootholdTrackerCfg,
+    R1RandomFootholdTrackerRunnerCfg,
+)
 from gym.utils.math import wrap_to_pi
 
 
@@ -32,6 +39,10 @@ class MockEnv:
         self.foot_states[:, 1, :3] = torch.tensor([0.0, 0.15, 0.0])
         self.foot_states[:, :, 6] = 1.0
         self.foot_heading = torch.zeros(num_envs, 2)
+        self.commands = torch.zeros(num_envs, 3)
+        self.commands[:, 0] = 0.4
+        self.step_period = torch.full((num_envs, 1), 30.0)
+        self.dt = 0.01
 
 
 def sampler_cfg():
@@ -45,6 +56,21 @@ def sampler_cfg():
         movement_direction_deg=[-20.0, 20.0],
         feet_direction_deg=[-20.0, 20.0],
         reach_x=[-0.10, 0.40],
+        reach_y=[-0.30, 0.30],
+        min_lateral_separation=0.12,
+    )
+
+
+def perturbed_sampler_cfg(jitter_x=(-0.04, 0.04), jitter_y=(-0.05, 0.05)):
+    return SimpleNamespace(
+        nominal_step_width=0.20,
+        jitter_x_range=list(jitter_x),
+        jitter_y_range=list(jitter_y),
+        yaw_offset_deg=[0.0, 0.0],
+        height_range=[0.0, 0.0],
+        hold_probability=0.0,
+        feet_direction_deg=[0.0, 0.0],
+        reach_x=[0.05, 0.30],
         reach_y=[-0.30, 0.30],
         min_lateral_separation=0.12,
     )
@@ -103,6 +129,57 @@ class FootholdGoalTests(unittest.TestCase):
         sampler.reset(torch.arange(env.num_envs))
         self.assertEqual(tuple(sampler.get_goal().shape), (7, 10))
 
+    def test_perturbed_nominal_goal_uses_velocity_and_step_time(self):
+        env = MockEnv()
+        sampler = PerturbedFootholdGoalSampler(
+            env, perturbed_sampler_cfg((0.0, 0.0), (0.0, 0.0))
+        )
+        sampler.reset(torch.arange(env.num_envs))
+        nominal = sampler.nominal_world_target_pos
+        # The left foot swings from the right stance foot at y=-0.15.
+        torch.testing.assert_close(
+            nominal[:, LEFT_FOOT, 0], torch.full((env.num_envs,), 0.12)
+        )
+        torch.testing.assert_close(
+            nominal[:, LEFT_FOOT, 1], torch.full((env.num_envs,), 0.05)
+        )
+        goal = sampler.get_goal().reshape(env.num_envs, 2, 5)
+        torch.testing.assert_close(
+            goal[:, LEFT_FOOT, :2],
+            torch.tensor([[0.12, 0.20]]).repeat(env.num_envs, 1),
+        )
+
+    def test_perturbed_goal_respects_jitter_bounds_and_no_crossing(self):
+        env = MockEnv(256)
+        sampler = PerturbedFootholdGoalSampler(env, perturbed_sampler_cfg())
+        ids = torch.arange(env.num_envs)
+        sampler.reset(ids)
+        self.assertTrue(torch.all(sampler.foothold_jitter[:, 0].abs() <= 0.04))
+        self.assertTrue(torch.all(sampler.foothold_jitter[:, 1].abs() <= 0.05))
+        goal = sampler.get_goal().reshape(env.num_envs, 2, 5)
+        self.assertTrue(torch.all(goal[:, LEFT_FOOT, 1] >= 0.12))
+
+        env.swing_foot_index[:] = RIGHT_FOOT
+        env.stance_foot_index[:] = LEFT_FOOT
+        sampler.update(ids, torch.ones(env.num_envs, dtype=torch.bool))
+        goal = sampler.get_goal().reshape(env.num_envs, 2, 5)
+        self.assertTrue(torch.all(goal[:, RIGHT_FOOT, 1] <= -0.12))
+
+    def test_perturbed_goal_is_frozen_between_phase_switches(self):
+        env = MockEnv()
+        sampler = PerturbedFootholdGoalSampler(env, perturbed_sampler_cfg())
+        ids = torch.arange(env.num_envs)
+        sampler.reset(ids)
+        goal_before = sampler.get_goal().clone()
+        target_before = sampler.world_target_pos.clone()
+        jitter_before = sampler.foothold_jitter.clone()
+        env.commands[:, 0] = 1.0
+        env.foot_states[:, :, 0] += 10.0
+        sampler.update(ids, torch.zeros(env.num_envs, dtype=torch.bool))
+        torch.testing.assert_close(sampler.get_goal(), goal_before)
+        torch.testing.assert_close(sampler.world_target_pos, target_before)
+        torch.testing.assert_close(sampler.foothold_jitter, jitter_before)
+
     def test_r1_task_configuration(self):
         env_cfg = R1FootholdTrackerCfg()
         runner_cfg = R1FootholdTrackerRunnerCfg()
@@ -137,6 +214,22 @@ class FootholdGoalTests(unittest.TestCase):
         )
         self.assertNotIn("foot_contact_state", runner_cfg.policy.actor_obs)
         self.assertIn("foot_contact_state", runner_cfg.policy.critic_obs)
+
+    def test_random_task_preserves_policy_shape_and_flat_defaults(self):
+        base_cfg = R1FootholdTrackerCfg()
+        env_cfg = R1RandomFootholdTrackerCfg()
+        runner_cfg = R1RandomFootholdTrackerRunnerCfg()
+        self.assertEqual(env_cfg.terrain.mesh_type, "plane")
+        self.assertEqual(env_cfg.env.num_observations, 54)
+        self.assertEqual(env_cfg.foothold_goal.jitter_x_range, [-0.04, 0.04])
+        self.assertEqual(env_cfg.foothold_goal.jitter_y_range, [-0.05, 0.05])
+        self.assertEqual(env_cfg.commands.ranges.lin_vel_x, [0.4, 0.4])
+        self.assertEqual(runner_cfg.runner.experiment_name,
+                         "Unitree_R1_Foothold_Tracker")
+        self.assertEqual(len(runner_cfg.policy.actor_obs), 7)
+        self.assertEqual(len(runner_cfg.policy.critic_obs), 11)
+        self.assertEqual(base_cfg.foothold_goal.step_length_range, [0.08, 0.16])
+        self.assertFalse(hasattr(base_cfg.foothold_goal, "jitter_x_range"))
 
     def test_swing_trajectory_reference(self):
         tracker = R1FootholdTracker.__new__(R1FootholdTracker)
