@@ -5,6 +5,7 @@ import torch
 
 from gym.envs import *
 from gym.utils import get_args, task_registry
+from gym.utils.math import quat_rotate_inverse
 
 
 def diagnose(args):
@@ -53,6 +54,12 @@ def diagnose(args):
     touchdown_samples = 0
     contact_slip_speed_sum = 0.0
     contact_slip_samples = 0
+    response_count = 0
+    response_target_sum = torch.zeros(2, device=env.device)
+    response_actual_sum = torch.zeros(2, device=env.device)
+    response_target_sq_sum = torch.zeros(2, device=env.device)
+    response_actual_sq_sum = torch.zeros(2, device=env.device)
+    response_cross_sum = torch.zeros(2, device=env.device)
 
     with torch.inference_mode():
         for step in range(warmup_steps + sample_steps):
@@ -99,6 +106,38 @@ def diagnose(args):
                     foot_xy_velocity.norm(dim=-1)[contact].sum().item()
                 )
                 contact_slip_samples += contact.sum().item()
+                if (
+                    hasattr(env.goal_generator, "nominal_world_target_pos")
+                    and touchdown.any()
+                ):
+                    position, _, _, _ = env._canonical_foot_values()
+                    canonical_quat = env.foot_states[:, [1, 0], 3:7]
+                    stance_quat = canonical_quat[batch, env.stance_foot_index]
+                    target_offset = (
+                        env.goal_generator.world_target_pos[batch, env.swing_foot_index]
+                        - env.goal_generator.nominal_world_target_pos[
+                            batch, env.swing_foot_index
+                        ]
+                    )
+                    actual_offset = (
+                        position[batch, env.swing_foot_index]
+                        - env.goal_generator.nominal_world_target_pos[
+                            batch, env.swing_foot_index
+                        ]
+                    )
+                    target_local = quat_rotate_inverse(
+                        stance_quat, target_offset
+                    )[touchdown, :2]
+                    actual_local = quat_rotate_inverse(
+                        stance_quat, actual_offset
+                    )[touchdown, :2]
+                    count = target_local.shape[0]
+                    response_count += count
+                    response_target_sum += target_local.sum(dim=0)
+                    response_actual_sum += actual_local.sum(dim=0)
+                    response_target_sq_sum += target_local.square().sum(dim=0)
+                    response_actual_sq_sum += actual_local.square().sum(dim=0)
+                    response_cross_sum += (target_local * actual_local).sum(dim=0)
             runner.reset_envs()
 
     samples = env.num_envs * sample_steps
@@ -122,6 +161,27 @@ def diagnose(args):
         )
     print(f"mean_action_rms: {sum(action_rms) / len(action_rms):.4f} rad")
     print(f"resets: {reset_count}")
+    if response_count:
+        count = float(response_count)
+        target_cov = response_target_sq_sum - response_target_sum.square() / count
+        actual_cov = response_actual_sq_sum - response_actual_sum.square() / count
+        cross_cov = response_cross_sum - (
+            response_target_sum * response_actual_sum / count
+        )
+        slope = cross_cov / target_cov.clamp_min(1.0e-9)
+        correlation = cross_cov / (
+            target_cov.clamp_min(1.0e-9).sqrt()
+            * actual_cov.clamp_min(1.0e-9).sqrt()
+        )
+        print(f"foothold_response_samples: {response_count}")
+        print(
+            "foothold_response_slope_xy: "
+            f"{slope[0].item():.4f}, {slope[1].item():.4f}"
+        )
+        print(
+            "foothold_response_correlation_xy: "
+            f"{correlation[0].item():.4f}, {correlation[1].item():.4f}"
+        )
 
 
 if __name__ == "__main__":

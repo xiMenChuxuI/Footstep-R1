@@ -105,8 +105,8 @@ python gym/scripts/train.py \
 ```bash
 python gym/scripts/play.py \
   --task=r1_foothold_tracker_random \
-  --load_run=r1_random_foothold_xy_stage1_1000 \
-  --checkpoint=-1
+  --load_run=Jul23_14-57-45_r1_random_foothold_xy_stage1_1000 \
+  --checkpoint=2000
 ```
 
 回退到训练随机范围演示：
@@ -114,8 +114,8 @@ python gym/scripts/play.py \
 ```bash
 python gym/scripts/play.py \
   --task=r1_foothold_tracker_random \
-  --load_run=r1_random_foothold_xy_stage1_1000 \
-  --checkpoint=-1 \
+  --load_run=Jul23_14-57-45_r1_random_foothold_xy_stage1_1000 \
+  --checkpoint=2000 \
   --foothold_jitter_x=0.04 \
   --foothold_jitter_y=0.05
 ```
@@ -125,13 +125,13 @@ python gym/scripts/play.py \
 ```bash
 python gym/scripts/audit_foothold_checkpoint.py \
   --task=r1_foothold_tracker_random \
-  --load_run=r1_random_foothold_xy_stage1_1000 \
-  --checkpoint=-1
+  --load_run=Jul23_14-57-45_r1_random_foothold_xy_stage1_1000 \
+  --checkpoint=2000
 
 python gym/scripts/diagnose_r1_policy.py \
   --task=r1_foothold_tracker_random \
-  --load_run=r1_random_foothold_xy_stage1_1000 \
-  --checkpoint=-1
+  --load_run=Jul23_14-57-45_r1_random_foothold_xy_stage1_1000 \
+  --checkpoint=2000
 ```
 
 ## 7. 测试与训练结果
@@ -149,4 +149,65 @@ python gym/scripts/diagnose_r1_policy.py \
 - 预训练 checkpoint 下，短步组实际触地 X 为 `0.1207 m`，
   长步组为 `0.1421 m`，证明策略输出会响应目标变化。
 
-1000 轮正式训练及训练后诊断结果将在训练完成后继续补充。
+正式训练结果：
+
+```text
+run:
+Jul23_14-57-45_r1_random_foothold_xy_stage1_1000
+
+checkpoint:
+model_2000.pt
+
+新增训练轮数: 1000
+新增仿真步数: 98,304,000
+训练用时: 1181.24 s
+最终训练 episode length: 1001.00
+最终训练 mean reward: 267.69
+```
+
+训练范围固定诊断：
+
+| 指标 | 结果 |
+| --- | ---: |
+| 世界前进速度 | `0.4219 m/s` |
+| stance contact ratio | `0.9975` |
+| flight ratio | `0.0005` |
+| touchdown XY error | `0.1350 m` |
+| 接触足滑移速度 | `0.0288 m/s` |
+| 200 步重置次数 | `1` |
+| X/Y 响应斜率 | `0.2847 / 1.1351` |
+| X/Y Pearson 相关系数 | `0.0599 / 0.1587` |
+
+放大 play 范围固定诊断：
+
+| 指标 | 结果 |
+| --- | ---: |
+| 世界前进速度 | `0.4161 m/s` |
+| stance contact ratio | `0.9969` |
+| touchdown XY error | `0.1667 m` |
+| 接触足滑移速度 | `0.0281 m/s` |
+| 200 步重置次数 | `1` |
+| X/Y 响应斜率 | `0.1457 / 0.5646` |
+| X/Y Pearson 相关系数 | `0.0467 / 0.1308` |
+
+目标消融审计：
+
+- 正常目标组速度为 `0.4139 m/s`，重置 `2` 次。
+- goal 清零组速度为 `-0.1694 m/s`，重置 `32` 次。
+- 同一状态清零目标造成 `0.803225 rad` 的动作 RMS 差异。
+- 短步/长步组实际触地 X 分别为 `0.1224/0.1353 m`。
+- 窄步/宽步组实际横向距离分别为 `0.1817/0.2111 m`。
+
+这些结果证明 10 维 foothold goal 已经实际影响策略动作和落脚位置，
+新 checkpoint 不是仅依靠原速度跟踪前进。
+
+## 8. 当前结论与限制
+
+本阶段的代码、训练、checkpoint 加载、相位锁存、可视化和目标消融均已完成。
+机器人在训练范围和放大 play 范围内都能保持稳定前进。
+
+但是，随机目标到实际 touchdown 的逐样本相关性仍然偏弱，尤其是 X 方向。
+这表示策略已经会使用 foothold goal，但还不是高精度的任意落脚点跟踪器。
+放大 play 随机范围主要用于视觉展示，不能把它的精度等同于训练范围。
+下一阶段若以精确随机落脚为目标，应优先调整 touchdown/stance 事件奖励和
+随机课程，而不是继续单纯增加训练轮数。
