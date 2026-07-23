@@ -34,7 +34,11 @@ def audit(args):
     env_cfg, train_cfg = task_registry.get_cfgs(args)
     env_cfg.env.num_envs = GROUP_SIZE * len(GROUPS)
     env_cfg.env.episode_length_s = 100
-    random_foothold_task = args.task == "r1_foothold_tracker_random"
+    random_foothold_task = args.task in (
+        "r1_foothold_tracker_random",
+        "r1_foothold_tracker_route_random",
+    )
+    route_random_task = args.task == "r1_foothold_tracker_route_random"
     if random_foothold_task:
         if args.foothold_jitter_x is not None:
             jitter_x = abs(args.foothold_jitter_x)
@@ -42,6 +46,16 @@ def audit(args):
         if args.foothold_jitter_y is not None:
             jitter_y = abs(args.foothold_jitter_y)
             env_cfg.foothold_goal.jitter_y_range = [-jitter_y, jitter_y]
+        if route_random_task:
+            if args.route_heading_bound is not None:
+                bound = abs(args.route_heading_bound)
+                env_cfg.random_route.heading_bound_deg = [bound] * 3
+            if args.route_noise is not None:
+                noise = abs(args.route_noise)
+                env_cfg.random_route.heading_noise_deg = [noise] * 3
+            if args.route_rate_limit is not None:
+                limit = abs(args.route_rate_limit)
+                env_cfg.random_route.heading_rate_limit_deg = [limit] * 3
     else:
         # Legacy play uses zero velocity; its footholds are sampled independently.
         env_cfg.commands.ranges.lin_vel_x = [0.0, 0.0]

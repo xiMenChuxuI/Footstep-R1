@@ -43,12 +43,31 @@ import torch
 
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(args)
-    random_foothold_task = args.task == "r1_foothold_tracker_random"
+    route_random_task = args.task == "r1_foothold_tracker_route_random"
+    random_foothold_task = args.task in (
+        "r1_foothold_tracker_random",
+        "r1_foothold_tracker_route_random",
+    )
     if random_foothold_task:
         jitter_x = 0.08 if args.foothold_jitter_x is None else abs(args.foothold_jitter_x)
         jitter_y = 0.10 if args.foothold_jitter_y is None else abs(args.foothold_jitter_y)
         env_cfg.foothold_goal.jitter_x_range = [-jitter_x, jitter_x]
         env_cfg.foothold_goal.jitter_y_range = [-jitter_y, jitter_y]
+    if route_random_task:
+        heading_bound = (
+            60.0 if args.route_heading_bound is None
+            else abs(args.route_heading_bound)
+        )
+        route_noise = (
+            8.0 if args.route_noise is None else abs(args.route_noise)
+        )
+        rate_limit = (
+            15.0 if args.route_rate_limit is None
+            else abs(args.route_rate_limit)
+        )
+        env_cfg.random_route.heading_bound_deg = [heading_bound] * 3
+        env_cfg.random_route.heading_noise_deg = [route_noise] * 3
+        env_cfg.random_route.heading_rate_limit_deg = [rate_limit] * 3
     requested_video_envs = 4 if args.video_2x2 else 1
     env_cfg.env.num_envs = max(requested_video_envs, min(env_cfg.env.num_envs, 9))
     env_cfg.env.env_spacing = 2.

@@ -52,6 +52,9 @@ class R1FootholdTracker(Hicl12Controller):
     def _create_goal_generator(self):
         return RandomFootholdGoalSampler(self, self.cfg.foothold_goal)
 
+    def _before_goal_update(self, switch_ids):
+        pass
+
     def _calculate_foot_states(self, foot_states):
         """Move R1 ankle-link poses to the configured sole contact center."""
         offset = torch.tensor(
@@ -110,6 +113,7 @@ class R1FootholdTracker(Hicl12Controller):
         switch_ids = self.phase_switch_mask.nonzero(as_tuple=False).flatten()
         self.touchdown_credited[switch_ids] = False
         self._latch_swing_start(switch_ids)
+        self._before_goal_update(switch_ids)
         env_ids = torch.arange(self.num_envs, device=self.device)
         self.goal_generator.update(env_ids, self.phase_switch_mask)
         self.foothold_goal[:] = self.goal_generator.get_goal()

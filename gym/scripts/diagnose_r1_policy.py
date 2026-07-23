@@ -5,18 +5,33 @@ import torch
 
 from gym.envs import *
 from gym.utils import get_args, task_registry
-from gym.utils.math import quat_rotate_inverse
+from gym.utils.math import quat_rotate_inverse, wrap_to_pi
 
 
 def diagnose(args):
     env_cfg, train_cfg = task_registry.get_cfgs(args)
-    if args.task == "r1_foothold_tracker_random":
+    random_foothold_task = args.task in (
+        "r1_foothold_tracker_random",
+        "r1_foothold_tracker_route_random",
+    )
+    route_random_task = args.task == "r1_foothold_tracker_route_random"
+    if random_foothold_task:
         if args.foothold_jitter_x is not None:
             jitter_x = abs(args.foothold_jitter_x)
             env_cfg.foothold_goal.jitter_x_range = [-jitter_x, jitter_x]
         if args.foothold_jitter_y is not None:
             jitter_y = abs(args.foothold_jitter_y)
             env_cfg.foothold_goal.jitter_y_range = [-jitter_y, jitter_y]
+    if route_random_task:
+        if args.route_heading_bound is not None:
+            bound = abs(args.route_heading_bound)
+            env_cfg.random_route.heading_bound_deg = [bound] * 3
+        if args.route_noise is not None:
+            noise = abs(args.route_noise)
+            env_cfg.random_route.heading_noise_deg = [noise] * 3
+        if args.route_rate_limit is not None:
+            limit = abs(args.route_rate_limit)
+            env_cfg.random_route.heading_rate_limit_deg = [limit] * 3
     env_cfg.env.num_envs = 64
     env_cfg.env.episode_length_s = 100
     env_cfg.init_state.pos[2] = 0.715
@@ -37,8 +52,8 @@ def diagnose(args):
     )
     runner.alg.actor_critic.eval()
 
-    warmup_steps = 20
-    sample_steps = 200
+    warmup_steps = 50 if route_random_task else 20
+    sample_steps = 600 if route_random_task else 200
     flight_count = 0
     double_support_count = 0
     stance_contact_count = 0
@@ -60,6 +75,9 @@ def diagnose(args):
     response_target_sq_sum = torch.zeros(2, device=env.device)
     response_actual_sq_sum = torch.zeros(2, device=env.device)
     response_cross_sum = torch.zeros(2, device=env.device)
+    route_heading_error = []
+    lateral_displacement = []
+    initial_base_y = env.root_states[:, 1].clone()
 
     with torch.inference_mode():
         for step in range(warmup_steps + sample_steps):
@@ -78,6 +96,15 @@ def diagnose(args):
                 vertical_speed.append(env.root_states[:, 9].abs().mean().item())
                 forward_speed.append(env.root_states[:, 7].mean().item())
                 action_rms.append(actions.square().mean().sqrt().item())
+                if hasattr(env, "route_heading"):
+                    route_heading_error.append(
+                        wrap_to_pi(
+                            env.route_heading - env.base_heading.squeeze(1)
+                        ).abs().mean().item()
+                    )
+                    lateral_displacement.append(
+                        (env.root_states[:, 1] - initial_base_y).abs().mean().item()
+                    )
                 tracking_error, yaw_error, swing_contact = env._swing_tracking_errors()
                 swing_xy_error.append(
                     tracking_error[:, :2].norm(dim=-1).mean().item()
@@ -161,6 +188,19 @@ def diagnose(args):
         )
     print(f"mean_action_rms: {sum(action_rms) / len(action_rms):.4f} rad")
     print(f"resets: {reset_count}")
+    if route_heading_error:
+        print(
+            "mean_abs_route_heading_error: "
+            f"{sum(route_heading_error) / len(route_heading_error):.4f} rad"
+        )
+        print(
+            "mean_abs_lateral_displacement: "
+            f"{sum(lateral_displacement) / len(lateral_displacement):.4f} m"
+        )
+        print(
+            "final_mean_abs_lateral_displacement: "
+            f"{lateral_displacement[-1]:.4f} m"
+        )
     if response_count:
         count = float(response_count)
         target_cov = response_target_sq_sum - response_target_sum.square() / count

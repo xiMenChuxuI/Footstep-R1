@@ -12,8 +12,12 @@ class R1RandomFootholdTracker(R1FootholdTracker):
     def _create_goal_generator(self):
         return PerturbedFootholdGoalSampler(self, self.cfg.foothold_goal)
 
+    def _prepare_foothold_commands(self, env_ids):
+        pass
+
     def _resample_commands(self, env_ids):
         super()._resample_commands(env_ids)
+        self._prepare_foothold_commands(env_ids)
         # Base reset samples commands after _reset_system(). Relatch the first
         # goal so it uses the newly sampled velocity and per-env step period.
         if hasattr(self, "goal_generator"):

@@ -48,6 +48,12 @@ class PerturbedFootholdGoalSampler(FootholdGoalGenerator):
         mask[env_ids] = True
         self.update(env_ids, mask)
 
+    def _sample_target_yaw(self, selected, count):
+        yaw_offset = torch.deg2rad(
+            self._uniform(*self.cfg.yaw_offset_deg, count)
+        )
+        return wrap_to_pi(self.theta_feet[selected] + yaw_offset)
+
     def update(self, env_ids, phase_switch_mask):
         selected = env_ids[phase_switch_mask[env_ids]]
         if selected.numel() == 0:
@@ -108,10 +114,7 @@ class PerturbedFootholdGoalSampler(FootholdGoalGenerator):
 
         nominal_pos = stance_to_world(nominal_local)
         sampled_pos = stance_to_world(sampled_local)
-        yaw_offset = torch.deg2rad(
-            self._uniform(*self.cfg.yaw_offset_deg, count)
-        )
-        sampled_yaw = wrap_to_pi(self.theta_feet[selected] + yaw_offset)
+        sampled_yaw = self._sample_target_yaw(selected, count)
         self.hold_still[selected] = (
             torch.rand(count, device=self.env.device) < self.cfg.hold_probability
         )

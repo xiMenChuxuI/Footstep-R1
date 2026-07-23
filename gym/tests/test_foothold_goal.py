@@ -9,6 +9,12 @@ from gym.envs.guidance.foothold_goal_sampler import RandomFootholdGoalSampler
 from gym.envs.guidance.perturbed_foothold_goal_sampler import (
     PerturbedFootholdGoalSampler,
 )
+from gym.envs.guidance.route_foothold_goal_sampler import (
+    RouteFootholdGoalSampler,
+)
+from gym.envs.guidance.smooth_random_route_generator import (
+    SmoothRandomRouteGenerator,
+)
 from gym.envs.guidance.stance_foot_adapter import (
     LEFT_FOOT,
     RIGHT_FOOT,
@@ -23,6 +29,13 @@ from gym.envs.humanoid.humanoid_foothold_tracker import R1FootholdTracker
 from gym.envs.humanoid.humanoid_random_foothold_tracker_config import (
     R1RandomFootholdTrackerCfg,
     R1RandomFootholdTrackerRunnerCfg,
+)
+from gym.envs.humanoid.humanoid_route_foothold_tracker import (
+    R1RouteFootholdTracker,
+)
+from gym.envs.humanoid.humanoid_route_foothold_tracker_config import (
+    R1RouteFootholdTrackerCfg,
+    R1RouteFootholdTrackerRunnerCfg,
 )
 from gym.utils.math import wrap_to_pi
 
@@ -43,6 +56,16 @@ class MockEnv:
         self.commands[:, 0] = 0.4
         self.step_period = torch.full((num_envs, 1), 30.0)
         self.dt = 0.01
+
+
+class MockRouteEnv:
+    def __init__(self, num_envs=4):
+        self.num_envs = num_envs
+        self.device = torch.device("cpu")
+        self.root_states = torch.zeros(num_envs, 13)
+        self.root_states[:, 6] = 1.0
+        self.commands = torch.zeros(num_envs, 3)
+        self.common_step_counter = 0
 
 
 def sampler_cfg():
@@ -73,6 +96,19 @@ def perturbed_sampler_cfg(jitter_x=(-0.04, 0.04), jitter_y=(-0.05, 0.05)):
         reach_x=[0.05, 0.30],
         reach_y=[-0.30, 0.30],
         min_lateral_separation=0.12,
+    )
+
+
+def route_cfg():
+    return SimpleNamespace(
+        speed=0.4,
+        rate_smoothing=0.8,
+        boundary_reflection=0.5,
+        heading_bound_deg=[10.0, 30.0, 45.0],
+        heading_noise_deg=[2.0, 4.0, 6.0],
+        heading_rate_limit_deg=[4.0, 8.0, 12.0],
+        curriculum_step_thresholds=[12000, 24000],
+        history_length=8,
     )
 
 
@@ -180,6 +216,64 @@ class FootholdGoalTests(unittest.TestCase):
         torch.testing.assert_close(sampler.world_target_pos, target_before)
         torch.testing.assert_close(sampler.foothold_jitter, jitter_before)
 
+    def test_random_route_reset_and_curriculum(self):
+        env = MockRouteEnv()
+        route = SmoothRandomRouteGenerator(env, route_cfg())
+        ids = torch.arange(env.num_envs)
+        route.reset(ids)
+        torch.testing.assert_close(route.heading, torch.zeros(env.num_envs))
+        torch.testing.assert_close(
+            env.commands[:, 0], torch.full((env.num_envs,), 0.4)
+        )
+        torch.testing.assert_close(env.commands[:, 1], torch.zeros(env.num_envs))
+        self.assertEqual(route.curriculum_values(), (0, 10.0, 2.0, 4.0))
+        env.common_step_counter = 12000
+        self.assertEqual(route.curriculum_values(), (1, 30.0, 4.0, 8.0))
+        env.common_step_counter = 24000
+        self.assertEqual(route.curriculum_values(), (2, 45.0, 6.0, 12.0))
+
+    def test_random_route_rate_limit_and_boundary_reflection(self):
+        env = MockRouteEnv(2)
+        route = SmoothRandomRouteGenerator(env, route_cfg())
+        ids = torch.arange(env.num_envs)
+        route.reset(ids)
+        route.heading[:] = torch.deg2rad(torch.tensor([9.0, -9.0]))
+        route.heading_rate[:] = torch.deg2rad(torch.tensor([4.0, -4.0]))
+        route._uniform = lambda low, high, count: torch.tensor([2.0, -2.0])
+        route.update(ids)
+        torch.testing.assert_close(
+            torch.rad2deg(route.heading), torch.tensor([10.0, -10.0])
+        )
+        torch.testing.assert_close(
+            torch.rad2deg(route.heading_rate), torch.tensor([-2.0, 2.0])
+        )
+
+    def test_route_goal_yaw_follows_route_heading(self):
+        env = MockEnv()
+        env.route_heading = torch.full((env.num_envs,), 0.3)
+        cfg = perturbed_sampler_cfg((0.0, 0.0), (0.0, 0.0))
+        sampler = RouteFootholdGoalSampler(env, cfg)
+        sampler.reset(torch.arange(env.num_envs))
+        goal = sampler.get_goal().reshape(env.num_envs, 2, 5)
+        goal_yaw = torch.atan2(
+            goal[:, LEFT_FOOT, 3], goal[:, LEFT_FOOT, 4]
+        )
+        torch.testing.assert_close(
+            goal_yaw, torch.full((env.num_envs,), 0.3)
+        )
+
+    def test_route_updates_once_per_left_right_pair(self):
+        tracker = R1RouteFootholdTracker.__new__(R1RouteFootholdTracker)
+        tracker.swing_foot_index = torch.tensor(
+            [LEFT_FOOT, RIGHT_FOOT, LEFT_FOOT, RIGHT_FOOT]
+        )
+        updated = []
+        tracker.route_generator = SimpleNamespace(
+            update=lambda env_ids: updated.append(env_ids.clone())
+        )
+        tracker._before_goal_update(torch.arange(4))
+        self.assertEqual(updated[0].tolist(), [0, 2])
+
     def test_r1_task_configuration(self):
         env_cfg = R1FootholdTrackerCfg()
         runner_cfg = R1FootholdTrackerRunnerCfg()
@@ -230,6 +324,20 @@ class FootholdGoalTests(unittest.TestCase):
         self.assertEqual(len(runner_cfg.policy.critic_obs), 11)
         self.assertEqual(base_cfg.foothold_goal.step_length_range, [0.08, 0.16])
         self.assertFalse(hasattr(base_cfg.foothold_goal, "jitter_x_range"))
+
+    def test_route_task_configuration(self):
+        env_cfg = R1RouteFootholdTrackerCfg()
+        runner_cfg = R1RouteFootholdTrackerRunnerCfg()
+        self.assertEqual(env_cfg.env.num_observations, 54)
+        self.assertEqual(env_cfg.random_route.heading_bound_deg,
+                         [10.0, 30.0, 45.0])
+        self.assertEqual(env_cfg.rewards.weights.base_heading, 0.0)
+        self.assertEqual(env_cfg.rewards.weights.route_heading_tracking, 4.0)
+        self.assertEqual(runner_cfg.runner.experiment_name,
+                         "Unitree_R1_Foothold_Tracker")
+        self.assertEqual(
+            R1RandomFootholdTrackerCfg().rewards.weights.base_heading, 4.0
+        )
 
     def test_swing_trajectory_reference(self):
         tracker = R1FootholdTracker.__new__(R1FootholdTracker)

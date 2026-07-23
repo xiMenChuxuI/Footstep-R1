@@ -214,6 +214,12 @@ def get_args():
          "help": "Play-time symmetric foothold X jitter in metres."},
         {"name": "--foothold_jitter_y", "type": float,
          "help": "Play-time symmetric foothold Y jitter in metres."},
+        {"name": "--route_heading_bound", "type": float,
+         "help": "Play-time route heading bound in degrees."},
+        {"name": "--route_noise", "type": float,
+         "help": "Play-time random route heading increment in degrees."},
+        {"name": "--route_rate_limit", "type": float,
+         "help": "Play-time route heading-rate limit in degrees per gait cycle."},
     ]
     # parse arguments
     args = gymutil.parse_arguments(
