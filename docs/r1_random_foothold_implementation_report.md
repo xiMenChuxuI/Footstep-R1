@@ -246,4 +246,65 @@ python gym/scripts/train.py \
   --disable_wandb
 ```
 
-训练与评估结果将在 Stage 2 完成后补充。
+正式训练结果：
+
+```text
+run:
+Jul24_08-29-34_r1_random_foothold_xy_stage2_expanded_1000
+
+checkpoint:
+model_3000.pt
+
+新增训练轮数: 1000
+新增仿真步数: 98,304,000
+训练用时: 1170.18 s
+最终训练 episode length: 1001.00
+最终训练 mean reward: 268.69
+最终 swing-foot XY tracking reward: 3.6333
+最终 touchdown accuracy reward: 1.0373
+最终 termination reward: 0.0000
+```
+
+训练范围固定诊断：
+
+| 指标 | 结果 |
+| --- | ---: |
+| 世界前进速度 | `0.4165 m/s` |
+| stance contact ratio | `0.9987` |
+| flight ratio | `0.0010` |
+| touchdown XY error | `0.0887 m` |
+| 接触足滑移速度 | `0.0329 m/s` |
+| 200 步重置次数 | `1` |
+| X/Y 响应斜率 | `0.1892 / 0.4562` |
+| X/Y Pearson 相关系数 | `0.1009 / 0.1378` |
+
+放大 play 范围固定诊断：
+
+| 指标 | 结果 |
+| --- | ---: |
+| 世界前进速度 | `0.4220 m/s` |
+| stance contact ratio | `0.9991` |
+| flight ratio | `0.0009` |
+| touchdown XY error | `0.1058 m` |
+| 接触足滑移速度 | `0.0317 m/s` |
+| 200 步重置次数 | `1` |
+| X/Y 响应斜率 | `0.2400 / 0.5217` |
+| X/Y Pearson 相关系数 | `0.1096 / 0.1682` |
+
+目标消融审计：
+
+- Actor/Critic 维度保持 `54/71`，foothold goal 位于 Actor 观测
+  `[44:54]`。
+- 摆动阶段目标最大变化为 `0.00000000`，phase switch 时平均变化为
+  `0.228840`。
+- 同一状态屏蔽 10 维目标后，动作 RMS 差异为 `0.680203 rad`。
+- 正常目标组速度为 `0.4311 m/s`、重置 `1` 次；goal 清零组速度降为
+  `0.1018 m/s`、重置增至 `24` 次。
+- 短步/长步组实际触地 X 分别为 `0.1117/0.1412 m`。
+- 窄步/宽步组实际横向距离分别为 `0.1869/0.2172 m`。
+
+Stage 2 达到了本次“训练偏移更明显、play 略大于训练”的目标。与 Stage 1
+相比，play 范围和训练范围的差距从 X/Y 各 `4/5 cm` 缩小为各 `2 cm`；
+在 `X±8 cm / Y±10 cm` 的展示范围内仍保持稳定行走，并且横向响应斜率
+提高到 `0.5217`。不过逐样本相关性仍然偏弱，因此当前模型适合展示
+“随机目标会改变实际落脚”，尚不能描述为高精度逐框踩踏。
