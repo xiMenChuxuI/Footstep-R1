@@ -226,7 +226,7 @@ class FootholdGoalTests(unittest.TestCase):
         self.assertEqual(env_cfg.foothold_goal.jitter_y_range, [-0.06, 0.06])
         self.assertAlmostEqual(env_cfg.foothold_goal.play_jitter_x, 0.06)
         self.assertAlmostEqual(env_cfg.foothold_goal.play_jitter_y, 0.08)
-        self.assertEqual(env_cfg.foothold_goal.precision_profile, "endpoint_stance")
+        self.assertEqual(env_cfg.foothold_goal.precision_profile, "endpoint_precision")
         self.assertAlmostEqual(
             env_cfg.rewards.weights.late_swing_foot_xy_tracking, 2.0
         )
@@ -234,7 +234,7 @@ class FootholdGoalTests(unittest.TestCase):
             env_cfg.rewards.weights.touchdown_accuracy_fine, 20.0
         )
         self.assertAlmostEqual(
-            env_cfg.rewards.weights.stance_accuracy_latched, 4.5
+            env_cfg.rewards.weights.stance_accuracy_latched, 3.0
         )
         self.assertEqual(env_cfg.commands.ranges.lin_vel_x, [0.4, 0.4])
         self.assertEqual(runner_cfg.runner.experiment_name,
