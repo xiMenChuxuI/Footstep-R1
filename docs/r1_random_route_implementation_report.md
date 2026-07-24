@@ -95,6 +95,30 @@ python gym/scripts/train.py \
   --disable_wandb
 ```
 
+最终演示：
+
+```bash
+python gym/scripts/play.py \
+  --task=r1_foothold_tracker_route_random \
+  --load_run=Jul23_16-25-19_r1_random_route_curriculum_1500 \
+  --checkpoint=3500
+```
+
+该命令默认使用 `±60° / ±8° / 15°` 路线参数和
+`X±8 cm / Y±10 cm` 落脚偏移。回退到训练最终阶段：
+
+```bash
+python gym/scripts/play.py \
+  --task=r1_foothold_tracker_route_random \
+  --load_run=Jul23_16-25-19_r1_random_route_curriculum_1500 \
+  --checkpoint=3500 \
+  --route_heading_bound=45 \
+  --route_noise=6 \
+  --route_rate_limit=12 \
+  --foothold_jitter_x=0.04 \
+  --foothold_jitter_y=0.05
+```
+
 ## 8. 训练前基线
 
 使用尚未进行路线课程训练的随机落脚 `model_2000.pt`，在第一阶段
@@ -110,4 +134,87 @@ python gym/scripts/train.py \
 | X/Y 目标响应相关系数 | `0.3817 / 0.8775` |
 
 该结果说明路线方向、世界速度、落脚位置和脚 yaw 已经形成闭环。正式训练结果、
-各阶段诊断、最终 checkpoint 和限制将在训练完成后补充。
+各阶段诊断、最终 checkpoint 和限制如下。
+
+## 9. 正式训练结果
+
+```text
+run:
+Jul23_16-25-19_r1_random_route_curriculum_1500
+
+checkpoint:
+model_3500.pt
+
+新增训练轮数: 1500
+新增仿真步数: 147,456,000
+训练用时: 1812.16 s
+最终训练 episode length: 1001.00
+最终训练 mean reward: 272.76
+最终 route heading reward: 3.9489 / 4.0
+```
+
+训练全程没有 NaN、CUDA 越界或 tensor shape 错误。Actor/Critic/Action
+维度保持 `54/71/12`。
+
+## 10. 分阶段固定诊断
+
+所有阶段使用 `64` 个环境、`600` 个采样步，即每组 `38400` 个样本：
+
+| 指标 | 10° / model_2500 | 30° / model_3000 | 45° / model_3500 | 60° play |
+| --- | ---: | ---: | ---: | ---: |
+| 重置次数 | `1` | `0` | `0` | `0` |
+| stance contact ratio | `0.9994` | `1.0000` | `1.0000` | `1.0000` |
+| flight ratio | `0.0002` | `0.0000` | `0.0000` | `0.0000` |
+| 世界 X 速度 | `0.4111` | `0.4318` | `0.4064` | `0.4034 m/s` |
+| 路线朝向误差 | `0.0555` | `0.0467` | `0.0487` | `0.0546 rad` |
+| 最终平均横向位移 | `0.1626` | `0.3541` | `0.5112` | `0.5432 m` |
+| touchdown XY error | `0.0356` | `0.0342` | `0.0323` | `0.0525 m` |
+| touchdown yaw error | `0.0176` | `0.0098` | `0.0124` | `0.0176 rad` |
+| 接触足滑移速度 | `0.0296` | `0.0253` | `0.0192` | `0.0204 m/s` |
+| X 目标相关系数 | `0.3346` | `0.6376` | `0.4467` | `0.5839` |
+| Y 目标相关系数 | `0.8048` | `0.6706` | `0.8489` | `0.9111` |
+
+横向位移随路线范围扩大而明显增加，证明当前行为已经从随机步宽变为累积的
+随机路线。60° play 范围仍能稳定运行，但 touchdown 误差比 45° 训练范围大。
+
+## 11. 目标消融
+
+最终 `model_3500.pt` 的审计结果：
+
+- foothold goal 位于 Actor observation `[44:54]`。
+- 摆动期目标最大变化为 `0.00000000`。
+- phase switch 平均目标变化为 `0.224527`。
+- 同一状态清零 goal 后，动作 RMS 差异为 `0.764272 rad`。
+- 正常组实际步宽约 `0.1984 m`，goal 清零后缩到 `0.0611 m`。
+- 短步/长步实际 X 分别为 `0.1112/0.1462 m`。
+- 窄步/宽步实际横向距离分别为 `0.1862/0.2110 m`。
+
+这些结果证明随机路线 checkpoint 会实际使用 10 维 stance-foot-frame 目标。
+
+## 12. 当前结论与限制
+
+当前版本已经实现：
+
+- 随机路线横向位移累积；
+- 身体朝向跟随路线切线；
+- 双脚位置和 yaw 与路线一致；
+- 旧世界 X 固定朝向奖励被新路线朝向奖励替代；
+- 10°、30°、45° 三阶段课程和 60° play 展示；
+- 绿色路线方向箭头和最近 24 个步态周期轨迹。
+
+第一版仍限制为相对初始朝向 `±45°` 训练，不支持掉头和连续 360° 绕行。
+60° 是超出训练分布的展示配置，虽然固定诊断稳定，但应优先使用 45° 配置
+做定量实验。
+
+## 13. Play 流程验证
+
+最终 checkpoint 已通过 `play.py` 的 2×2 录像流程，生成：
+
+```text
+logs/Unitree_R1_Foothold_Tracker/videos/
+20260724_081329_2x2_r1_random_route_curriculum_1500.mp4
+```
+
+视频规格为 `1280×720`、`180` 帧、`3.6 s`。headless 录像不会执行 Isaac
+Gym viewer 的 debug line 绘制，因此录像中不包含落脚框和绿色路线轨迹。
+正常启动非 headless `play.py` 时会显示完整调试可视化。
