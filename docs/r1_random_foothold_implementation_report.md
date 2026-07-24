@@ -308,3 +308,124 @@ Stage 2 达到了本次“训练偏移更明显、play 略大于训练”的目�
 在 `X±8 cm / Y±10 cm` 的展示范围内仍保持稳定行走，并且横向响应斜率
 提高到 `0.5217`。不过逐样本相关性仍然偏弱，因此当前模型适合展示
 “随机目标会改变实际落脚”，尚不能描述为高精度逐框踩踏。
+
+## 10. Stage 3 平衡精度课程
+
+### 10.1 配置与奖励
+
+Stage 3 将训练随机范围调整为 `X±0.05 m / Y±0.06 m`，Play 默认范围调整为
+`X±0.06 m / Y±0.08 m`。新增两个不改变策略观测维度的奖励：
+
+- `late_swing_foot_xy_tracking`：摆动后半程平滑生效，
+  `sigma=0.0064`；
+- `touchdown_accuracy_fine`：仅在首次有效触地事件生效，只计算 XY，
+  `sigma=0.0049`。
+
+Actor/Critic/Action 维度继续保持 `54/71/12`，原 `model_3000.pt` 可以直接
+加载。增加 `--foothold_precision_profile` 参数，支持：
+
+```text
+range_only
+endpoint_precision
+endpoint_stance
+```
+
+### 10.2 三组短对照
+
+三组实验均固定 seed `42`、使用 1024 环境、从同一个 Stage 2
+`model_3000.pt` 独立续训 150 轮。随后分别在训练和 Play 范围使用
+seeds `11/22/33` 诊断。
+
+| Profile | 训练误差 | Play误差 | 训练接触率 | Play接触率 | Play Y响应斜率 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| range_only | `13.23 cm` | `13.06 cm` | `99.84%` | `99.83%` | `0.275` |
+| endpoint_precision | `9.89 cm` | `9.34 cm` | `99.67%` | `99.88%` | `0.453` |
+| endpoint_stance | `14.24 cm` | `13.73 cm` | `99.87%` | `99.84%` | `0.655` |
+
+`endpoint_precision` 在稳定性门槛内误差最低。将
+`stance_accuracy_latched` 从 `3.0` 提高到 `4.5` 没有继续改善触地精度，
+所以正式配置采用：
+
+```text
+late_swing_foot_xy_tracking = 2.0
+touchdown_accuracy_fine = 20.0
+stance_accuracy_latched = 3.0
+```
+
+### 10.3 正式 500 轮训练
+
+正式训练从 Stage 2 `model_3000.pt` 重新开始，不继承短实验模型：
+
+```bash
+python gym/scripts/train.py \
+  --task=r1_foothold_tracker_random \
+  --resume \
+  --load_run=Jul24_08-29-34_r1_random_foothold_xy_stage2_expanded_1000 \
+  --checkpoint=3000 \
+  --foothold_precision_profile=endpoint_precision \
+  --seed=42 \
+  --num_envs=4096 \
+  --max_iterations=500 \
+  --run_name=r1_random_foothold_stage3_precision_balanced_500 \
+  --headless \
+  --disable_wandb
+```
+
+训练输出：
+
+```text
+run:
+Jul24_09-29-19_r1_random_foothold_stage3_precision_balanced_500
+
+最终 checkpoint:
+model_3500.pt
+
+新增仿真步数: 49,152,000
+训练用时: 598.41 s
+最终 mean reward: 279.65
+最终 episode length: 1001.00
+最终 termination reward: 0.0000
+```
+
+训练奖励持续提高，但固定多 seed 诊断发现 `model_3500.pt` 的真实 touchdown
+误差回升到训练 `13.22 cm`、Play `13.09 cm`。这属于奖励代理指标过拟合，
+因此 `model_3500.pt` 保留用于复盘，但不作为推荐演示模型。
+
+### 10.4 Checkpoint 选择与最终结论
+
+使用同一诊断条件比较关键 checkpoint：
+
+| Checkpoint | 训练误差 | Play误差 | Play接触率 | Play最大重置 |
+| --- | ---: | ---: | ---: | ---: |
+| Stage 2 `model_3000` | `8.35 cm` | `10.45 cm` | `99.85%` | `1` |
+| 短实验 `model_3150` | `9.89 cm` | `9.34 cm` | `99.88%` | `1` |
+| 正式 `model_3200` | `9.22 cm` | `8.46 cm` | `99.85%` | `2` |
+| 正式 `model_3300` | `9.41 cm` | `10.72 cm` | `99.80%` | `1` |
+| 正式 `model_3500` | `13.22 cm` | `13.09 cm` | `99.83%` | `1` |
+
+当前推荐 Play checkpoint 为正式 run 的 `model_3200.pt`。它相对 Stage 2
+将 Play 平均 touchdown 误差从 `10.45 cm` 降到 `8.46 cm`，改善约
+`1.99 cm`；但一个固定 seed 出现 2 次重置，因此没有完全通过每个 seed
+重置 `≤1` 的严格门槛。
+
+`model_3200.pt` 的目标消融结果：
+
+- 摆动期目标最大变化：`0.00000000`；
+- 同状态 goal 清零动作 RMS 差异：`0.837491 rad`；
+- 正常目标速度/重置：`0.4273 m/s / 1`；
+- goal 清零速度/重置：`0.2761 m/s / 32`；
+- 窄/宽目标实际横向落脚：`0.1844/0.2210 m`，相差 `3.66 cm`。
+
+因此 Stage 3 确实增强了策略对随机目标的响应，并改善了 Play 平均精度，
+但没有达到训练误差 `≤7.5 cm` 的目标，也没有在所有 seed 上满足重置
+`≤1`。本阶段应描述为“部分通过”：功能、目标响应和 Play 精度改善已完成，
+高精度和全 seed 稳定性仍需后续重新设计奖励或采用早停课程。
+
+推荐演示命令：
+
+```bash
+python gym/scripts/play.py \
+  --task=r1_foothold_tracker_random \
+  --load_run=Jul24_09-29-19_r1_random_foothold_stage3_precision_balanced_500 \
+  --checkpoint=3200
+```
