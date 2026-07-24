@@ -45,8 +45,16 @@ def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(args)
     random_foothold_task = args.task == "r1_foothold_tracker_random"
     if random_foothold_task:
-        jitter_x = 0.08 if args.foothold_jitter_x is None else abs(args.foothold_jitter_x)
-        jitter_y = 0.10 if args.foothold_jitter_y is None else abs(args.foothold_jitter_y)
+        jitter_x = (
+            env_cfg.foothold_goal.play_jitter_x
+            if args.foothold_jitter_x is None
+            else abs(args.foothold_jitter_x)
+        )
+        jitter_y = (
+            env_cfg.foothold_goal.play_jitter_y
+            if args.foothold_jitter_y is None
+            else abs(args.foothold_jitter_y)
+        )
         env_cfg.foothold_goal.jitter_x_range = [-jitter_x, jitter_x]
         env_cfg.foothold_goal.jitter_y_range = [-jitter_y, jitter_y]
     requested_video_envs = 4 if args.video_2x2 else 1

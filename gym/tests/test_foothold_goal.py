@@ -24,6 +24,7 @@ from gym.envs.humanoid.humanoid_random_foothold_tracker_config import (
     R1RandomFootholdTrackerCfg,
     R1RandomFootholdTrackerRunnerCfg,
 )
+from gym.utils.helpers import apply_foothold_precision_profile
 from gym.utils.math import wrap_to_pi
 
 
@@ -221,8 +222,20 @@ class FootholdGoalTests(unittest.TestCase):
         runner_cfg = R1RandomFootholdTrackerRunnerCfg()
         self.assertEqual(env_cfg.terrain.mesh_type, "plane")
         self.assertEqual(env_cfg.env.num_observations, 54)
-        self.assertEqual(env_cfg.foothold_goal.jitter_x_range, [-0.06, 0.06])
-        self.assertEqual(env_cfg.foothold_goal.jitter_y_range, [-0.08, 0.08])
+        self.assertEqual(env_cfg.foothold_goal.jitter_x_range, [-0.05, 0.05])
+        self.assertEqual(env_cfg.foothold_goal.jitter_y_range, [-0.06, 0.06])
+        self.assertAlmostEqual(env_cfg.foothold_goal.play_jitter_x, 0.06)
+        self.assertAlmostEqual(env_cfg.foothold_goal.play_jitter_y, 0.08)
+        self.assertEqual(env_cfg.foothold_goal.precision_profile, "endpoint_stance")
+        self.assertAlmostEqual(
+            env_cfg.rewards.weights.late_swing_foot_xy_tracking, 2.0
+        )
+        self.assertAlmostEqual(
+            env_cfg.rewards.weights.touchdown_accuracy_fine, 20.0
+        )
+        self.assertAlmostEqual(
+            env_cfg.rewards.weights.stance_accuracy_latched, 4.5
+        )
         self.assertEqual(env_cfg.commands.ranges.lin_vel_x, [0.4, 0.4])
         self.assertEqual(runner_cfg.runner.experiment_name,
                          "Unitree_R1_Foothold_Tracker")
@@ -230,6 +243,61 @@ class FootholdGoalTests(unittest.TestCase):
         self.assertEqual(len(runner_cfg.policy.critic_obs), 11)
         self.assertEqual(base_cfg.foothold_goal.step_length_range, [0.08, 0.16])
         self.assertFalse(hasattr(base_cfg.foothold_goal, "jitter_x_range"))
+
+    def test_precision_profiles_are_reproducible(self):
+        expected = {
+            "range_only": (0.0, 0.0, 3.0),
+            "endpoint_precision": (2.0, 20.0, 3.0),
+            "endpoint_stance": (2.0, 20.0, 4.5),
+        }
+        for profile, weights in expected.items():
+            cfg = R1RandomFootholdTrackerCfg()
+            apply_foothold_precision_profile(cfg, profile)
+            self.assertEqual(cfg.foothold_goal.precision_profile, profile)
+            self.assertEqual(
+                cfg.rewards.weights.late_swing_foot_xy_tracking, weights[0]
+            )
+            self.assertEqual(
+                cfg.rewards.weights.touchdown_accuracy_fine, weights[1]
+            )
+            self.assertEqual(
+                cfg.rewards.weights.stance_accuracy_latched, weights[2]
+            )
+
+    def test_late_swing_precision_gate(self):
+        tracker = R1FootholdTracker.__new__(R1FootholdTracker)
+        tracker.num_envs = 3
+        tracker.device = torch.device("cpu")
+        tracker.phase = torch.tensor([[0.10], [0.25], [0.45]])
+        tracker.cfg = SimpleNamespace(
+            rewards=SimpleNamespace(late_swing_xy_tracking_sigma=0.0064)
+        )
+        tracker._swing_trajectory_errors = lambda: (
+            torch.zeros(3, 3),
+            torch.zeros(3),
+        )
+        reward = tracker._reward_late_swing_foot_xy_tracking()
+        torch.testing.assert_close(reward[:2], torch.zeros(2))
+        self.assertGreater(reward[2].item(), 0.0)
+
+    def test_fine_touchdown_reward_only_uses_valid_event(self):
+        tracker = R1FootholdTracker.__new__(R1FootholdTracker)
+        tracker.num_envs = 2
+        tracker.device = torch.device("cpu")
+        tracker.swing_foot_index = torch.tensor([LEFT_FOOT, RIGHT_FOOT])
+        tracker.touchdown_event = torch.tensor(
+            [[True, False], [False, False]], dtype=torch.bool
+        )
+        tracker.cfg = SimpleNamespace(
+            rewards=SimpleNamespace(touchdown_fine_tracking_sigma=0.0049)
+        )
+        tracker._swing_tracking_errors = lambda: (
+            torch.zeros(2, 3),
+            torch.zeros(2),
+            torch.zeros(2, dtype=torch.bool),
+        )
+        reward = tracker._reward_touchdown_accuracy_fine()
+        torch.testing.assert_close(reward, torch.tensor([1.0, 0.0]))
 
     def test_swing_trajectory_reference(self):
         tracker = R1FootholdTracker.__new__(R1FootholdTracker)

@@ -144,6 +144,9 @@ def update_cfg_from_args(env_cfg, train_cfg, args):
             env_cfg.viewer.record = args.record
         if args.video_2x2:
             env_cfg.viewer.record = True
+        precision_profile = getattr(args, "foothold_precision_profile", None)
+        if precision_profile is not None:
+            apply_foothold_precision_profile(env_cfg, precision_profile)
     if train_cfg is not None:
         if args.seed is not None:
             train_cfg.seed = args.seed
@@ -165,6 +168,29 @@ def update_cfg_from_args(env_cfg, train_cfg, args):
 
 
     return env_cfg, train_cfg
+
+
+def apply_foothold_precision_profile(env_cfg, profile):
+    """Apply a reproducible R1 random-foothold reward ablation profile."""
+    profiles = {
+        "range_only": (0.0, 0.0, 3.0),
+        "endpoint_precision": (2.0, 20.0, 3.0),
+        "endpoint_stance": (2.0, 20.0, 4.5),
+    }
+    if profile not in profiles:
+        raise ValueError(
+            f"Unknown foothold precision profile '{profile}'. "
+            f"Expected one of: {', '.join(profiles)}"
+        )
+    if not hasattr(env_cfg, "foothold_goal"):
+        raise ValueError("Foothold precision profiles require a foothold_goal config")
+
+    late_swing, fine_touchdown, stance_latched = profiles[profile]
+    env_cfg.foothold_goal.precision_profile = profile
+    env_cfg.rewards.weights.late_swing_foot_xy_tracking = late_swing
+    env_cfg.rewards.weights.touchdown_accuracy_fine = fine_touchdown
+    env_cfg.rewards.weights.stance_accuracy_latched = stance_latched
+    return env_cfg
 
 def get_args():
     custom_parameters = [
@@ -214,6 +240,9 @@ def get_args():
          "help": "Play-time symmetric foothold X jitter in metres."},
         {"name": "--foothold_jitter_y", "type": float,
          "help": "Play-time symmetric foothold Y jitter in metres."},
+        {"name": "--foothold_precision_profile", "type": str,
+         "choices": ["range_only", "endpoint_precision", "endpoint_stance"],
+         "help": "Reproducible random-foothold precision reward profile."},
     ]
     # parse arguments
     args = gymutil.parse_arguments(

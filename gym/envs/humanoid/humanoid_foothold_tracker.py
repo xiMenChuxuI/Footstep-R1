@@ -346,6 +346,16 @@ class R1FootholdTracker(Hicl12Controller):
             self.cfg.rewards.swing_xy_tracking_sigma,
         )
 
+    def _reward_late_swing_foot_xy_tracking(self):
+        error, _ = self._swing_trajectory_errors()
+        progress = ((self._local_phase() - 0.5) * 2.0).clamp(0.0, 1.0)
+        gate = progress.square() * (3.0 - 2.0 * progress)
+        accuracy = self._tracking_reward(
+            torch.sum(error[:, :2].square(), dim=-1),
+            self.cfg.rewards.late_swing_xy_tracking_sigma,
+        )
+        return gate * accuracy
+
     def _reward_swing_foot_z_tracking(self):
         error, _ = self._swing_trajectory_errors()
         return self._tracking_reward(
@@ -365,6 +375,16 @@ class R1FootholdTracker(Hicl12Controller):
         accuracy = self._tracking_reward(
             torch.sum(error.square(), dim=-1) + 0.25 * yaw_error.square(),
             self.cfg.rewards.touchdown_tracking_sigma,
+        )
+        return accuracy * touchdown.float()
+
+    def _reward_touchdown_accuracy_fine(self):
+        error, _, _ = self._swing_tracking_errors()
+        batch = torch.arange(self.num_envs, device=self.device)
+        touchdown = self.touchdown_event[batch, self.swing_foot_index]
+        accuracy = self._tracking_reward(
+            torch.sum(error[:, :2].square(), dim=-1),
+            self.cfg.rewards.touchdown_fine_tracking_sigma,
         )
         return accuracy * touchdown.float()
 
