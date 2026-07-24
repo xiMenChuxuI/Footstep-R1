@@ -221,8 +221,8 @@ class FootholdGoalTests(unittest.TestCase):
         runner_cfg = R1RandomFootholdTrackerRunnerCfg()
         self.assertEqual(env_cfg.terrain.mesh_type, "plane")
         self.assertEqual(env_cfg.env.num_observations, 54)
-        self.assertEqual(env_cfg.foothold_goal.jitter_x_range, [-0.04, 0.04])
-        self.assertEqual(env_cfg.foothold_goal.jitter_y_range, [-0.05, 0.05])
+        self.assertEqual(env_cfg.foothold_goal.jitter_x_range, [-0.06, 0.06])
+        self.assertEqual(env_cfg.foothold_goal.jitter_y_range, [-0.08, 0.08])
         self.assertEqual(env_cfg.commands.ranges.lin_vel_x, [0.4, 0.4])
         self.assertEqual(runner_cfg.runner.experiment_name,
                          "Unitree_R1_Foothold_Tracker")

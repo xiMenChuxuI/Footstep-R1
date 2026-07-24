@@ -27,14 +27,21 @@
 
 ## 3. 随机范围与约束
 
-训练范围为：
+Stage 1 训练范围为：
 
 ```text
 X: [-0.04, +0.04] m
 Y: [-0.05, +0.05] m
 ```
 
-`play.py` 默认展示范围为：
+Stage 2 在 Stage 1 tag 之后扩大为：
+
+```text
+X: [-0.06, +0.06] m
+Y: [-0.08, +0.08] m
+```
+
+`play.py` 默认展示范围保持为：
 
 ```text
 X: [-0.08, +0.08] m
@@ -211,3 +218,32 @@ model_2000.pt
 放大 play 随机范围主要用于视觉展示，不能把它的精度等同于训练范围。
 下一阶段若以精确随机落脚为目标，应优先调整 touchdown/stance 事件奖励和
 随机课程，而不是继续单纯增加训练轮数。
+
+## 9. Stage 2 扩大随机偏移
+
+Stage 2 从以下 checkpoint 热启动：
+
+```text
+Jul23_14-57-45_r1_random_foothold_xy_stage1_1000/model_2000.pt
+```
+
+训练随机范围扩大到 `X±0.06 m / Y±0.08 m`，`play.py` 继续使用
+`X±0.08 m / Y±0.10 m`。因此展示配置只比训练范围多 `2 cm`，减少
+训练与展示之间的分布差异。
+
+训练命令：
+
+```bash
+python gym/scripts/train.py \
+  --task=r1_foothold_tracker_random \
+  --resume \
+  --load_run=Jul23_14-57-45_r1_random_foothold_xy_stage1_1000 \
+  --checkpoint=2000 \
+  --num_envs=4096 \
+  --max_iterations=1000 \
+  --run_name=r1_random_foothold_xy_stage2_expanded_1000 \
+  --headless \
+  --disable_wandb
+```
+
+训练与评估结果将在 Stage 2 完成后补充。
