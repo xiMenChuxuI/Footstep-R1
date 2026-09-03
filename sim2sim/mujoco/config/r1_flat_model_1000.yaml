@@ -1,0 +1,32 @@
+robot:
+  official_scene: /root/work/unitree_mujoco/unitree_robots/r1/scene.xml
+  official_commit: 4134cb5dc7ff1ba7f484deda48b5274b58694519
+  official_archive_sha256: b2bc4db456598771e65010e94faf27cb5413ce1a9ff158f203a153b25303f6cf
+  base_position: [0.0, 0.0, 0.715]
+  base_quaternion_wxyz: [1.0, 0.0, 0.0, 0.0]
+  foot_position_offset: [0.04, 0.0, -0.053]
+
+simulation:
+  sim_dt: 0.001
+  policy_dt: 0.01
+  duration: 30.0
+
+control:
+  default_q: [-0.35, 0.0, 0.0, 0.70, -0.35, 0.0, -0.35, 0.0, 0.0, 0.70, -0.35, 0.0]
+  kp: [45.0, 45.0, 35.0, 55.0, 30.0, 25.0, 45.0, 45.0, 35.0, 55.0, 30.0, 25.0]
+  kd: [2.0, 2.0, 1.5, 2.5, 1.2, 1.0, 2.0, 2.0, 1.5, 2.5, 1.2, 1.0]
+  torque_limits: [60.0, 60.0, 60.0, 60.0, 50.0, 50.0, 60.0, 60.0, 60.0, 60.0, 50.0, 50.0]
+  action_scale: 0.25
+  action_clip: 4.0
+  # Isaac Gym collapses these fixed joints into the pelvis rigid body. A stiff
+  # hold approximates that topology while retaining the official full R1 MJCF.
+  upper_body_kp: 100.0
+  upper_body_kd: 5.0
+
+foothold:
+  command_velocity: [0.4, 0.0]
+  half_cycle_steps: 30
+  step_length: 0.12
+  step_width: 0.20
+  target_height: 0.0
+  target_yaw: 0.0
