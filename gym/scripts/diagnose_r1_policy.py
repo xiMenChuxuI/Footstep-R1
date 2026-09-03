@@ -38,6 +38,9 @@ def diagnose(args):
     vertical_speed = []
     forward_speed = []
     action_rms = []
+    base_height = []
+    base_pitch = []
+    stance_knee_angle = []
     swing_xy_error = []
     touchdown_xy_error_sum = 0.0
     touchdown_x_error_sum = 0.0
@@ -64,6 +67,18 @@ def diagnose(args):
                 vertical_speed.append(env.root_states[:, 9].abs().mean().item())
                 forward_speed.append(env.root_states[:, 7].mean().item())
                 action_rms.append(actions.square().mean().sqrt().item())
+                base_height.append(env.root_states[:, 2].mean().item())
+                base_pitch.append(env.base_euler_xyz[:, 1].abs().mean().item())
+                knee_indices = torch.where(
+                    env.stance_foot_index == 0,
+                    torch.full_like(env.stance_foot_index, 3),
+                    torch.full_like(env.stance_foot_index, 9),
+                )
+                stance_knee_angle.append(
+                    env.dof_pos[
+                        torch.arange(env.num_envs, device=env.device), knee_indices
+                    ].mean().item()
+                )
                 tracking_error, yaw_error, swing_contact = env._swing_tracking_errors()
                 swing_xy_error.append(
                     tracking_error[:, :2].norm(dim=-1).mean().item()
@@ -114,6 +129,12 @@ def diagnose(args):
             f"{contact_slip_speed_sum / contact_slip_samples:.4f} m/s"
         )
     print(f"mean_action_rms: {sum(action_rms) / len(action_rms):.4f} rad")
+    print(f"mean_base_height: {sum(base_height) / len(base_height):.4f} m")
+    print(f"mean_abs_base_pitch: {sum(base_pitch) / len(base_pitch):.4f} rad")
+    print(
+        "mean_stance_knee_angle: "
+        f"{sum(stance_knee_angle) / len(stance_knee_angle):.4f} rad"
+    )
     print(f"resets: {reset_count}")
 
 

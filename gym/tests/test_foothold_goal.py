@@ -17,6 +17,11 @@ from gym.envs.humanoid.humanoid_foothold_tracker_config import (
     R1FootholdTrackerRunnerCfg,
 )
 from gym.envs.humanoid.humanoid_foothold_tracker import R1FootholdTracker
+from gym.envs.humanoid.r1_tall_foothold_tracker import R1TallFootholdTracker
+from gym.envs.humanoid.r1_tall_foothold_tracker_config import (
+    R1TallFootholdTrackerCfg,
+    R1TallFootholdTrackerRunnerCfg,
+)
 from gym.utils.math import wrap_to_pi
 
 
@@ -51,6 +56,23 @@ def sampler_cfg():
 
 
 class FootholdGoalTests(unittest.TestCase):
+    def test_tall_task_keeps_policy_dimensions(self):
+        env_cfg = R1TallFootholdTrackerCfg()
+        runner_cfg = R1TallFootholdTrackerRunnerCfg()
+        self.assertEqual(env_cfg.env.num_observations, 54)
+        self.assertEqual(len(runner_cfg.policy.actor_obs), 7)
+        self.assertEqual(env_cfg.rewards.base_height_target, 0.72)
+        self.assertEqual(env_cfg.rewards.weights.base_height_tall, 2.0)
+
+    def test_tall_height_reward_prefers_target_height(self):
+        tracker = R1TallFootholdTracker.__new__(R1TallFootholdTracker)
+        tracker.cfg = R1TallFootholdTrackerCfg()
+        tracker.base_height = torch.tensor([[0.72], [0.68]])
+        reward = tracker._reward_base_height_tall()
+        self.assertGreater(reward[0].item(), reward[1].item())
+        self.assertGreater(reward[0].item(), 0.99)
+        self.assertLess(reward[1].item(), 0.2)
+
     def test_world_to_stance_transform(self):
         targets = torch.tensor([[[1.0, 2.0, 0.0], [2.0, 1.0, 0.0]]])
         target_yaw = torch.tensor([[math.pi / 2.0, math.pi]])

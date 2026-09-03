@@ -11,6 +11,7 @@ from sim2sim.mujoco.math_utils import world_to_stance_foot_goal
 
 SIM2SIM_ROOT = Path(__file__).resolve().parents[1]
 CONFIG = SIM2SIM_ROOT / "mujoco/config/r1_flat_model_1000.yaml"
+TALL_CONFIG = SIM2SIM_ROOT / "mujoco/config/r1_tall_model_1500.yaml"
 
 
 class FootholdTests(unittest.TestCase):
@@ -76,6 +77,29 @@ class OfficialModelTests(unittest.TestCase):
             self.adapter.apply_action(action)
             self.assertFalse(self.adapter.has_fallen)
         self.assertGreater(self.adapter.data.qpos[0], 1.5)
+
+
+class TallPolicyTests(unittest.TestCase):
+    def test_tall_policy_walks_for_five_seconds(self):
+        from sim2sim.mujoco.policy import NumpyMLPPolicy
+
+        policy_path = (
+            Path(__file__).resolve().parents[2]
+            / "artifacts/sim2sim/r1_tall_model_1500/policy_weights.npz"
+        )
+        if not policy_path.exists():
+            self.skipTest("Exported tall model_1500 artifact is not present")
+        config = yaml.safe_load(TALL_CONFIG.read_text())
+        scene = Path(config["robot"]["official_scene"])
+        if not scene.exists():
+            self.skipTest(f"Official unitree_mujoco scene missing: {scene}")
+        adapter = R1MujocoAdapter(scene, config)
+        policy = NumpyMLPPolicy.load(policy_path)
+        for _ in range(500):
+            adapter.apply_action(policy(adapter.observation()))
+            self.assertFalse(adapter.has_fallen)
+        self.assertGreater(adapter.data.qpos[0], 1.5)
+        self.assertGreater(adapter.data.qpos[2], 0.69)
 
 
 if __name__ == "__main__":
